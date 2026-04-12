@@ -1,3 +1,4 @@
+import { useRef, useCallback } from 'react';
 import type { ComboAction } from '@/lib/comboParser';
 import { CardDisplay } from './CardDisplay';
 import { ActionIcon, ActionArrow } from './ActionIcon';
@@ -18,43 +19,74 @@ const DEFAULT_ACTION_COLOR = { text: 'text-accent', bg: 'bg-accent/10', border: 
 
 export function ComboStepVisual({ action, stepNumber }: { action: ComboAction; stepNumber: number }) {
   const labelsToRender = action.labels && action.labels.length > 0 ? action.labels : [action.label];
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const el = cardRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const cx = rect.width / 2;
+    const cy = rect.height / 2;
+    const angle = Math.atan2(y - cy, x - cx) * (180 / Math.PI) + 90;
+    const distX = Math.max(0, 1 - Math.min(x, rect.width - x) / (rect.width / 2));
+    const distY = Math.max(0, 1 - Math.min(y, rect.height - y) / (rect.height / 2));
+    const proximity = Math.min(100, Math.max(distX, distY) * 100);
+    el.style.setProperty('--cursor-angle', `${angle}deg`);
+    el.style.setProperty('--edge-proximity', `${proximity}`);
+  }, []);
+
+  const handleMouseLeave = useCallback(() => {
+    const el = cardRef.current;
+    if (!el) return;
+    el.style.setProperty('--edge-proximity', '0');
+  }, []);
 
   return (
-    <div className="glass-panel rounded-xl p-6 flex flex-col gap-4">
-      {/* Step label */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <span className="font-display font-bold text-sm text-sky-300 bg-sky-300/10 px-3 py-1 rounded-full border border-sky-300/30">
-          Step {stepNumber}
-        </span>
-        {labelsToRender.map((lbl) => {
-          const color = ACTION_COLORS[lbl] || DEFAULT_ACTION_COLOR;
-          return (
-            <span key={lbl} className={`font-display font-semibold text-sm px-3 py-1 rounded-full ${color.text} ${color.bg} ${color.border} border`}>
-              {lbl}
-            </span>
-          );
-        })}
-      </div>
+    <div
+      ref={cardRef}
+      className="border-glow-card"
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+    >
+      <div className="edge-light" />
+      <div className="border-glow-inner p-6 gap-4">
+        {/* Step label */}
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="font-display font-bold text-sm text-sky-300 bg-sky-300/10 px-3 py-1 rounded-full border border-sky-300/30">
+            Step {stepNumber}
+          </span>
+          {labelsToRender.map((lbl) => {
+            const color = ACTION_COLORS[lbl] || DEFAULT_ACTION_COLOR;
+            return (
+              <span key={lbl} className={`font-display font-semibold text-sm px-3 py-1 rounded-full ${color.text} ${color.bg} ${color.border} border`}>
+                {lbl}
+              </span>
+            );
+          })}
+        </div>
 
-      {/* Visual */}
-      <div className="flex items-center justify-center gap-2 flex-wrap">
-        <CardDisplay name={action.sourceCard} />
+        {/* Visual */}
+        <div className="flex items-center justify-center gap-2 flex-wrap">
+          <CardDisplay name={action.sourceCard} />
 
-        {action.targetCard && (
-          <>
-            <div className="flex flex-col items-center gap-1">
+          {action.targetCard && (
+            <>
+              <div className="flex flex-col items-center gap-1">
+                <ActionIcon type={action.type} />
+                <ActionArrow />
+              </div>
+              <CardDisplay name={action.targetCard} />
+            </>
+          )}
+
+          {!action.targetCard && (
+            <div className="ml-3">
               <ActionIcon type={action.type} />
-              <ActionArrow />
             </div>
-            <CardDisplay name={action.targetCard} />
-          </>
-        )}
-
-        {!action.targetCard && (
-          <div className="ml-3">
-            <ActionIcon type={action.type} />
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );
