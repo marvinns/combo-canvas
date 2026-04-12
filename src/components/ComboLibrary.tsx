@@ -61,32 +61,36 @@ export function ComboLibrary({ currentText, onLoad }: ComboLibraryProps) {
           No saved combos yet. Write a combo and save it!
         </p>
       ) : (
-        <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-          {combos.map((combo) => (
-            <div
-              key={combo.id}
-              className="flex items-center gap-3 bg-secondary/40 rounded-lg px-3 py-2.5 group hover:bg-secondary/70 transition-colors"
-            >
-              <button
-                onClick={() => onLoad(combo)}
-                className="flex-1 text-left min-w-0"
+        <div className="scroll-list-container">
+          <div className="top-gradient" />
+          <div className="scroll-list">
+            {combos.map((combo) => (
+              <div
+                key={combo.id}
+                className="item flex items-center gap-3 group hover:!bg-secondary/70 transition-colors cursor-pointer"
               >
-                <span className="font-display font-semibold text-sm text-foreground block truncate">
-                  {combo.name}
-                </span>
-                <span className="text-xs text-muted-foreground truncate block">
-                  {combo.text.split('\n').length} step{combo.text.split('\n').length !== 1 ? 's' : ''}
-                </span>
-              </button>
-              <button
-                onClick={() => handleDelete(combo.id)}
-                className="text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100 text-sm shrink-0"
-                title="Delete"
-              >
-                ✕
-              </button>
-            </div>
-          ))}
+                <button
+                  onClick={() => onLoad(combo)}
+                  className="flex-1 text-left min-w-0"
+                >
+                  <span className="item-text font-display font-semibold text-sm block truncate">
+                    {combo.name}
+                  </span>
+                  <span className="text-xs text-muted-foreground truncate block">
+                    {combo.text.split('\n').length} step{combo.text.split('\n').length !== 1 ? 's' : ''}
+                  </span>
+                </button>
+                <button
+                  onClick={() => handleDelete(combo.id)}
+                  className="text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100 text-sm shrink-0"
+                  title="Delete"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="bottom-gradient" />
         </div>
       )}
     </div>
