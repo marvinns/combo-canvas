@@ -1,6 +1,7 @@
 export interface ComboAction {
   type: 'summon' | 'send-gy' | 'activate' | 'search' | 'banish' | 'draw' | 'set' | 'tribute' | 'link' | 'xyz' | 'synchro' | 'fusion' | 'return' | 'negate' | 'destroy' | 'discard' | 'detach' | 'generic';
   label: string;
+  labels?: string[];
   sourceCard: string;
   targetCard?: string;
   raw: string;
@@ -69,7 +70,8 @@ export function parseComboStep(line: string): ComboAction {
       if (type === 'summon' && label === 'Special Summon' && match[2]) {
         return {
           type: 'send-gy',
-          label: 'Special Summon + Send to GY',
+          label: 'Special Summon',
+          labels: ['Special Summon', 'Send to GY'],
           sourceCard: match[1],
           targetCard: match[2],
           raw: trimmed,
