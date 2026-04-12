@@ -58,9 +58,12 @@ export default function Index() {
       <div className="max-w-4xl mx-auto space-y-8">
         {/* Header */}
         <header className="text-center space-y-2">
-          <h1 className="font-display font-bold text-4xl md:text-5xl text-foreground tracking-tight">
-            Combo <span className="text-primary">Visualizer</span>
-          </h1>
+          <div className="animated-gradient-text with-border">
+            <div className="gradient-overlay" />
+            <h1 className="text-content font-display font-bold text-4xl md:text-5xl tracking-tight">
+              Combo Visualizer
+            </h1>
+          </div>
           <p className="text-muted-foreground font-body text-sm">
             Write your combo steps using <code className="text-accent bg-accent/10 px-1.5 py-0.5 rounded text-xs">[Card Name]</code> brackets — get instant visuals
           </p>
