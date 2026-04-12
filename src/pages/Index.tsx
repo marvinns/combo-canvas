@@ -137,9 +137,15 @@ export default function Index() {
             <h2 className="font-display font-bold text-xl text-foreground">
               Combo Breakdown
             </h2>
-            {steps.map((step, i) => (
-              <ComboStepVisual key={i} action={step} stepNumber={i + 1} />
-            ))}
+            <div className="scroll-list-container">
+              <div className="top-gradient" />
+              <div className="scroll-list space-y-4">
+                {steps.map((step, i) => (
+                  <ComboStepVisual key={i} action={step} stepNumber={i + 1} />
+                ))}
+              </div>
+              <div className="bottom-gradient" />
+            </div>
           </div>
         )}
       </div>
