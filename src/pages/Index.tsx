@@ -87,7 +87,22 @@ export default function Index() {
             >
               Load Example
             </button>
+          {/* Presets */}
+          <div className="pt-2 border-t border-border/50">
+            <p className="text-xs text-muted-foreground font-body mb-2">Quick insert:</p>
+            <div className="flex flex-wrap gap-1.5">
+              {PRESETS.map((preset) => (
+                <button
+                  key={preset}
+                  onClick={() => handleInsertPreset(preset)}
+                  className="px-2.5 py-1 bg-secondary/60 text-muted-foreground text-xs font-body rounded-md border border-border/50 hover:bg-primary/20 hover:text-foreground hover:border-primary/40 transition-all"
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
           </div>
+        </div>
         </div>
 
         {/* Syntax help */}
