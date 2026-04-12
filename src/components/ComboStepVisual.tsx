@@ -69,7 +69,7 @@ export function ComboStepVisual({ action, stepNumber }: { action: ComboAction; s
 
         {/* Visual */}
         <div className="flex items-center justify-center gap-2 flex-wrap">
-          <CardDisplay name={action.sourceCard} />
+          <CardDisplay name={action.sourceCard} actionType={action.type} />
 
           {action.targetCard && (
             <>
@@ -77,7 +77,7 @@ export function ComboStepVisual({ action, stepNumber }: { action: ComboAction; s
                 <ActionIcon type={action.type} />
                 <ActionArrow />
               </div>
-              <CardDisplay name={action.targetCard} />
+              <CardDisplay name={action.targetCard} actionType={action.type} />
             </>
           )}
 
