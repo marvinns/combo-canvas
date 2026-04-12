@@ -8,6 +8,13 @@ export interface ComboAction {
 }
 
 const ACTION_PATTERNS: { pattern: RegExp; type: ComboAction['type']; label: string }[] = [
+  // Extra deck summons (must be before generic summon)
+  { pattern: /link\s+summon\s+\[(.+?)\]/i, type: 'link', label: 'Link Summon' },
+  { pattern: /xyz\s+summon\s+\[(.+?)\]/i, type: 'xyz', label: 'Xyz Summon' },
+  { pattern: /synchro\s+summon\s+\[(.+?)\]/i, type: 'synchro', label: 'Synchro Summon' },
+  { pattern: /fusion\s+summon\s+\[(.+?)\]/i, type: 'fusion', label: 'Fusion Summon' },
+  { pattern: /tribute\s+(?:summon\s+)?\[(.+?)\]/i, type: 'tribute', label: 'Tribute' },
+
   // Summon patterns
   { pattern: /(?:normal|flip)\s+summon\s+\[(.+?)\]/i, type: 'summon', label: 'Normal Summon' },
   { pattern: /special\s+summon\s+\[(.+?)\](?:\s+(?:from|in)\s+\w+)?(?:.*?(?:and|,|then)\s+send\s+\[(.+?)\]\s+to\s+the?\s*(?:gy|graveyard))?/i, type: 'summon', label: 'Special Summon' },
