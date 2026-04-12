@@ -368,6 +368,8 @@
   position: relative;
   border-radius: 20px;
   overflow: hidden;
+  padding: 4px;
+  background: #111;
 }
 
 .border-gradient-bottom {
