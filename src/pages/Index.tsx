@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { parseCombo, type ComboAction } from '@/lib/comboParser';
 import { ComboStepVisual } from '@/components/ComboStepVisual';
+import { ComboLibrary } from '@/components/ComboLibrary';
+import type { SavedCombo } from '@/lib/comboLibrary';
 
 const EXAMPLE_COMBO = `Special Summon [Diabellze the White Witch] from hand and send [Susurrus of the Sinful Spoils] to the Graveyard
 Activate [Susurrus of the Sinful Spoils] targeting [Diabellze the White Witch]
