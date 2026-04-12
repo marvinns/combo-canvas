@@ -87,6 +87,9 @@ export default function Index() {
           </div>
         </details>
 
+        {/* Combo Library */}
+        <ComboLibrary currentText={comboText} onLoad={handleLoadCombo} />
+
         {/* Steps */}
         {steps.length > 0 && (
           <div className="space-y-4">
