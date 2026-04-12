@@ -59,12 +59,6 @@ const ACTION_PATTERNS: { pattern: RegExp; type: ComboAction['type']; label: stri
   // Draw
   { pattern: /draw\s+(\d+)\s+cards?/i, type: 'draw', label: 'Draw' },
 
-  // Extra deck summons
-  { pattern: /link\s+summon\s+\[(.+?)\]/i, type: 'link', label: 'Link Summon' },
-  { pattern: /xyz\s+summon\s+\[(.+?)\]/i, type: 'xyz', label: 'Xyz Summon' },
-  { pattern: /synchro\s+summon\s+\[(.+?)\]/i, type: 'synchro', label: 'Synchro Summon' },
-  { pattern: /fusion\s+summon\s+\[(.+?)\]/i, type: 'fusion', label: 'Fusion Summon' },
-  { pattern: /tribute\s+(?:summon\s+)?\[(.+?)\]/i, type: 'tribute', label: 'Tribute' },
 ];
 
 export function parseComboStep(line: string): ComboAction {
