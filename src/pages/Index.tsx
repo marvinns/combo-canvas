@@ -8,6 +8,28 @@ const EXAMPLE_COMBO = `Special Summon [Diabellze the White Witch] from hand and 
 Activate [Susurrus of the Sinful Spoils] targeting [Diabellze the White Witch]
 Search [Guiding Light] from deck`;
 
+const PRESETS = [
+  'Normal Summon [Card]',
+  'Special Summon [Card] from hand',
+  'Link Summon [Card]',
+  'Xyz Summon [Card]',
+  'Synchro Summon [Card]',
+  'Fusion Summon [Card]',
+  'Activate [Card]',
+  'Activate [Card] targeting [Card]',
+  '[Card] sends [Card] to the GY',
+  'Search [Card] from deck',
+  'Add [Card] to hand',
+  'Set [Card]',
+  'Discard [Card]',
+  'Banish [Card]',
+  'Detach [Card]',
+  'Destroy [Card]',
+  '[Card] negates [Card]',
+  'Return [Card] to hand',
+  'Tribute [Card]',
+];
+
 export default function Index() {
   const [comboText, setComboText] = useState('');
   const [steps, setSteps] = useState<ComboAction[]>([]);
@@ -15,6 +37,10 @@ export default function Index() {
   const handleVisualize = () => {
     const parsed = parseCombo(comboText);
     setSteps(parsed);
+  };
+
+  const handleInsertPreset = (preset: string) => {
+    setComboText(prev => prev + (prev && !prev.endsWith('\n') ? '\n' : '') + preset);
   };
 
   const handleExample = () => {
@@ -61,7 +87,22 @@ export default function Index() {
             >
               Load Example
             </button>
+          {/* Presets */}
+          <div className="pt-2 border-t border-border/50">
+            <p className="text-xs text-muted-foreground font-body mb-2">Quick insert:</p>
+            <div className="flex flex-wrap gap-1.5">
+              {PRESETS.map((preset) => (
+                <button
+                  key={preset}
+                  onClick={() => handleInsertPreset(preset)}
+                  className="px-2.5 py-1 bg-secondary/60 text-muted-foreground text-xs font-body rounded-md border border-border/50 hover:bg-primary/20 hover:text-foreground hover:border-primary/40 transition-all"
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
           </div>
+        </div>
         </div>
 
         {/* Syntax help */}
