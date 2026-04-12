@@ -8,6 +8,28 @@ const EXAMPLE_COMBO = `Special Summon [Diabellze the White Witch] from hand and 
 Activate [Susurrus of the Sinful Spoils] targeting [Diabellze the White Witch]
 Search [Guiding Light] from deck`;
 
+const PRESETS = [
+  'Normal Summon [Card]',
+  'Special Summon [Card] from hand',
+  'Link Summon [Card]',
+  'Xyz Summon [Card]',
+  'Synchro Summon [Card]',
+  'Fusion Summon [Card]',
+  'Activate [Card]',
+  'Activate [Card] targeting [Card]',
+  '[Card] sends [Card] to the GY',
+  'Search [Card] from deck',
+  'Add [Card] to hand',
+  'Set [Card]',
+  'Discard [Card]',
+  'Banish [Card]',
+  'Detach [Card]',
+  'Destroy [Card]',
+  '[Card] negates [Card]',
+  'Return [Card] to hand',
+  'Tribute [Card]',
+];
+
 export default function Index() {
   const [comboText, setComboText] = useState('');
   const [steps, setSteps] = useState<ComboAction[]>([]);
@@ -15,6 +37,10 @@ export default function Index() {
   const handleVisualize = () => {
     const parsed = parseCombo(comboText);
     setSteps(parsed);
+  };
+
+  const handleInsertPreset = (preset: string) => {
+    setComboText(prev => prev + (prev && !prev.endsWith('\n') ? '\n' : '') + preset);
   };
 
   const handleExample = () => {
