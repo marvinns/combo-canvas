@@ -22,6 +22,11 @@ export default function Index() {
     setSteps(parseCombo(EXAMPLE_COMBO));
   };
 
+  const handleLoadCombo = (combo: SavedCombo) => {
+    setComboText(combo.text);
+    setSteps(parseCombo(combo.text));
+  };
+
   return (
     <div className="min-h-screen p-4 md:p-8">
       <div className="max-w-4xl mx-auto space-y-8">
