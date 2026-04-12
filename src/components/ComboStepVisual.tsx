@@ -11,23 +11,29 @@ const ACTION_COLORS: Record<string, { text: string; bg: string; border: string }
   'Link Summon': { text: 'text-blue-400', bg: 'bg-blue-400/10', border: 'border-blue-400/30' },
   'Search': { text: 'text-gray-400', bg: 'bg-gray-400/10', border: 'border-gray-400/30' },
   'Add to Hand': { text: 'text-gray-400', bg: 'bg-gray-400/10', border: 'border-gray-400/30' },
+  'Send to GY': { text: 'text-gray-500', bg: 'bg-gray-500/10', border: 'border-gray-500/30' },
 };
 
 const DEFAULT_ACTION_COLOR = { text: 'text-accent', bg: 'bg-accent/10', border: 'border-accent/30' };
 
 export function ComboStepVisual({ action, stepNumber }: { action: ComboAction; stepNumber: number }) {
-  const color = ACTION_COLORS[action.label] || DEFAULT_ACTION_COLOR;
+  const labelsToRender = action.labels && action.labels.length > 0 ? action.labels : [action.label];
 
   return (
     <div className="glass-panel rounded-xl p-6 flex flex-col gap-4">
       {/* Step label */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <span className="font-display font-bold text-sm text-sky-300 bg-sky-300/10 px-3 py-1 rounded-full border border-sky-300/30">
           Step {stepNumber}
         </span>
-        <span className={`font-display font-semibold text-sm px-3 py-1 rounded-full ${color.text} ${color.bg} ${color.border} border`}>
-          {action.label}
-        </span>
+        {labelsToRender.map((lbl) => {
+          const color = ACTION_COLORS[lbl] || DEFAULT_ACTION_COLOR;
+          return (
+            <span key={lbl} className={`font-display font-semibold text-sm px-3 py-1 rounded-full ${color.text} ${color.bg} ${color.border} border`}>
+              {lbl}
+            </span>
+          );
+        })}
       </div>
 
       {/* Visual */}
