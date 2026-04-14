@@ -764,10 +764,10 @@ export default function Index() {
         )}
       </div>
       {isMobile && isBreakdownFullMode && activeStep && (
-        <div ref={fullModeContainerRef} className="fixed inset-0 z-50 bg-black">
-          <div className="relative flex h-full w-full items-center justify-center overflow-hidden p-0">
+        <div ref={fullModeContainerRef} className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm">
+          <div className="flex h-full w-full items-center justify-center p-3">
             <div
-              className="relative h-full w-full overflow-auto bg-black"
+              className="relative flex max-h-[94dvh] max-w-[96vw] items-center justify-center"
               onTouchStart={handleBreakdownTouchStart}
               onTouchEnd={handleBreakdownTouchEnd}
             >
@@ -802,7 +802,7 @@ export default function Index() {
                 Step {activeStepIndex + 1} / {steps.length}
               </div>
               <div
-                className="flex min-h-full w-full items-center justify-center px-12 py-10"
+                className="flex max-h-[94dvh] w-fit max-w-[96vw] items-center justify-center px-12 py-10"
               >
                 {renderBreakdownVisual('full')}
               </div>
