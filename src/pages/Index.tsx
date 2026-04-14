@@ -204,6 +204,7 @@ export default function Index() {
   const editorRef = useRef<HTMLDivElement>(null);
   const previousHighlightedStepRef = useRef<number | null>(null);
   const touchStartXRef = useRef<number | null>(null);
+  const fullModeContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (steps.length === 0) return;
@@ -291,6 +292,45 @@ export default function Index() {
       document.body.style.overflow = previousOverflow;
     };
   }, [isBreakdownFullMode]);
+
+  useEffect(() => {
+    if (!isBreakdownFullMode || !isMobile) return;
+
+    const fullModeElement = fullModeContainerRef.current;
+    const orientation = screen.orientation;
+
+    const enterFullscreen = async () => {
+      try {
+        if (fullModeElement && document.fullscreenElement !== fullModeElement) {
+          await fullModeElement.requestFullscreen();
+        }
+      } catch {
+        // Ignore fullscreen failures on browsers that do not support it.
+      }
+
+      try {
+        await orientation?.lock?.('landscape');
+      } catch {
+        // Ignore orientation lock failures on unsupported mobile browsers.
+      }
+    };
+
+    void enterFullscreen();
+
+    return () => {
+      try {
+        orientation?.unlock?.();
+      } catch {
+        // Ignore orientation unlock failures.
+      }
+
+      if (document.fullscreenElement) {
+        void document.exitFullscreen().catch(() => {
+          // Ignore fullscreen exit failures.
+        });
+      }
+    };
+  }, [isBreakdownFullMode, isMobile]);
 
   const handleVisualize = () => {
     const parsed = parseCombo(comboText);
@@ -389,6 +429,14 @@ export default function Index() {
     }
 
     goToPreviousStep();
+  };
+
+  const openBreakdownFullMode = () => {
+    setIsBreakdownFullMode(true);
+  };
+
+  const closeBreakdownFullMode = () => {
+    setIsBreakdownFullMode(false);
   };
 
   const handleAddComment = () => {
@@ -665,7 +713,7 @@ export default function Index() {
                 {isMobile && (
                   <button
                     type="button"
-                    onClick={() => setIsBreakdownFullMode(true)}
+                    onClick={openBreakdownFullMode}
                     className="rounded-full border border-border/60 bg-secondary/50 px-3 py-1 text-xs font-display font-semibold text-muted-foreground transition-all hover:bg-secondary/80 hover:text-foreground"
                   >
                     <span className="inline-flex items-center gap-1.5">
@@ -716,41 +764,18 @@ export default function Index() {
         )}
       </div>
       {isMobile && isBreakdownFullMode && activeStep && (
-        <div className="fixed inset-0 z-50 bg-background/95 backdrop-blur-md">
-          <div className="flex h-full flex-col">
-            <div className="flex items-center justify-between border-b border-border/50 px-4 py-3">
-              <div className="flex items-center gap-2">
-                <span className="rounded-full border border-border/60 bg-secondary/50 px-3 py-1 text-xs font-display font-semibold text-muted-foreground">
-                  Step {activeStepIndex + 1} / {steps.length}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsBreakdownFullMode(false)}
-                  className="rounded-full border border-border/60 bg-secondary/50 px-3 py-1 text-xs font-display font-semibold text-muted-foreground transition-all hover:bg-secondary/80 hover:text-foreground"
-                >
-                  <span className="inline-flex items-center gap-1.5">
-                    <Minimize2 className="h-3.5 w-3.5" />
-                    Exit Full
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsBreakdownFullMode(false)}
-                  className="flex h-9 w-9 items-center justify-center rounded-full border border-border/60 bg-secondary/60 text-foreground transition-all hover:bg-secondary/90"
-                  aria-label="Close full mode"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-            <div className="relative flex-1 overflow-y-auto px-3 py-4">
+        <div ref={fullModeContainerRef} className="fixed inset-0 z-50 bg-black">
+          <div className="relative flex h-full w-full items-center justify-center overflow-hidden p-0">
+            <div
+              className="relative h-full w-full overflow-auto bg-black"
+              onTouchStart={handleBreakdownTouchStart}
+              onTouchEnd={handleBreakdownTouchEnd}
+            >
               <button
                 type="button"
                 onClick={goToPreviousStep}
                 disabled={activeStepIndex === 0}
-                className="absolute left-2 top-1/2 z-10 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full border border-border/60 bg-background/85 text-foreground shadow-lg backdrop-blur transition-all hover:bg-secondary/90 disabled:cursor-not-allowed disabled:opacity-35"
+                className="absolute left-3 top-1/2 z-20 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full border border-white/10 bg-black/70 text-white shadow-lg backdrop-blur transition-all hover:bg-black/90 disabled:cursor-not-allowed disabled:opacity-35"
                 aria-label="Previous step"
               >
                 <ChevronLeft className="h-5 w-5" />
@@ -759,15 +784,25 @@ export default function Index() {
                 type="button"
                 onClick={goToNextStep}
                 disabled={activeStepIndex === steps.length - 1}
-                className="absolute right-2 top-1/2 z-10 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full border border-border/60 bg-background/85 text-foreground shadow-lg backdrop-blur transition-all hover:bg-secondary/90 disabled:cursor-not-allowed disabled:opacity-35"
+                className="absolute right-3 top-1/2 z-20 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full border border-white/10 bg-black/70 text-white shadow-lg backdrop-blur transition-all hover:bg-black/90 disabled:cursor-not-allowed disabled:opacity-35"
                 aria-label="Next step"
               >
                 <ChevronRight className="h-5 w-5" />
               </button>
+              <button
+                type="button"
+                onClick={closeBreakdownFullMode}
+                className="absolute right-3 top-3 z-20 flex h-10 min-w-10 items-center justify-center gap-1 rounded-full border border-white/10 bg-black/70 px-3 text-white shadow-lg backdrop-blur transition-all hover:bg-black/90"
+                aria-label="Close full mode"
+              >
+                <Minimize2 className="h-4 w-4" />
+                <X className="h-4 w-4" />
+              </button>
+              <div className="absolute left-3 top-3 z-20 rounded-full border border-white/10 bg-black/70 px-3 py-1 text-xs font-display font-semibold text-white shadow-lg backdrop-blur">
+                Step {activeStepIndex + 1} / {steps.length}
+              </div>
               <div
-                className="mx-auto max-w-5xl px-12"
-                onTouchStart={handleBreakdownTouchStart}
-                onTouchEnd={handleBreakdownTouchEnd}
+                className="flex min-h-full w-full items-center justify-center px-12 py-10"
               >
                 {renderBreakdownVisual('full')}
               </div>
