@@ -1,8 +1,10 @@
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Exo+2:wght@300;400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Exo+2:wght@300;400;500;600;700&display=swap');
+
 
 @layer base {
   :root {
@@ -58,9 +60,15 @@
     @apply border-border;
   }
 
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
   body {
     @apply bg-background text-foreground font-body;
-    background: var(--cosmic-gradient);
+    background: hsl(var(--background));
     min-height: 100vh;
   }
 }
@@ -85,6 +93,71 @@
   }
   .card-shadow {
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5), 0 0 15px hsl(var(--glow-primary) / 0.15);
+  }
+  .shapegrid-canvas {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    border: none;
+    display: block;
+    overflow: hidden;
+    background:
+      radial-gradient(circle at top, hsl(var(--glow-accent) / 0.14), transparent 34%),
+      radial-gradient(circle at 80% 20%, hsl(var(--glow-primary) / 0.18), transparent 28%),
+      linear-gradient(180deg, hsl(233 36% 11%), hsl(230 25% 8%));
+  }
+
+  .shapegrid-canvas::before,
+  .shapegrid-canvas::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+  }
+
+  .shapegrid-canvas::before {
+    background-image:
+      linear-gradient(hsl(0 0% 100% / 0.16) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(0 0% 100% / 0.16) 1px, transparent 1px),
+      linear-gradient(hsl(var(--accent) / 0.08) 2px, transparent 2px),
+      linear-gradient(90deg, hsl(var(--accent) / 0.08) 2px, transparent 2px);
+    background-size: 56px 56px;
+    background-position: 0 0;
+    mask-image: radial-gradient(circle at center, black, transparent 85%);
+    -webkit-mask-image: radial-gradient(circle at center, black, transparent 85%);
+    opacity: 0.95;
+    animation: shapegrid-pan 18s linear infinite;
+  }
+
+  .shapegrid-canvas::after {
+    background:
+      radial-gradient(circle at center, hsl(var(--accent) / 0.22) 0, transparent 18%),
+      radial-gradient(circle at center, hsl(var(--primary) / 0.14) 0, transparent 32%);
+    filter: blur(28px);
+    transform: scale(1.15);
+    opacity: 0.75;
+    animation: shapegrid-pulse 9s ease-in-out infinite alternate;
+  }
+}
+
+@keyframes shapegrid-pan {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+
+  to {
+    transform: translate3d(-56px, -56px, 0);
+  }
+}
+
+@keyframes shapegrid-pulse {
+  from {
+    opacity: 0.4;
+    transform: scale(1.05);
+  }
+
+  to {
+    opacity: 0.85;
+    transform: scale(1.2);
   }
 }
 
@@ -136,6 +209,60 @@
 .scroll-list .item-text {
   color: hsl(var(--foreground));
   margin: 0;
+}
+
+.card-swap-container {
+  position: relative;
+  height: 240px;
+  width: 190px;
+  perspective: 900px;
+  overflow: visible;
+}
+
+.card-swap-container .card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  transform: translate(-50%, -50%) translate(var(--stack-x, 0), var(--stack-y, 0)) rotate(var(--stack-rotate, 0deg));
+  transform-origin: bottom right;
+  transform-style: preserve-3d;
+  will-change: transform;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  animation: cascade-stack-float 2.4s ease-in-out infinite;
+  animation-delay: var(--stack-delay, 0s);
+}
+
+.card-swap-container .card:focus-visible {
+  outline: 2px solid hsl(var(--accent));
+  outline-offset: 4px;
+}
+
+@keyframes cascade-stack-float {
+  0%,
+  100% {
+    transform: translate(-50%, -50%) translate(var(--stack-x, 0), var(--stack-y, 0)) rotate(var(--stack-rotate, 0deg));
+  }
+
+  50% {
+    transform: translate(-50%, -50%) translate(var(--stack-x, 0), calc(var(--stack-y, 0) - 10px)) rotate(calc(var(--stack-rotate, 0deg) + 1.5deg));
+  }
+}
+
+@media (max-width: 768px) {
+  .card-swap-container {
+    transform: scale(0.75) translate(25%, 25%);
+  }
+}
+
+@media (max-width: 480px) {
+  .card-swap-container {
+    transform: scale(0.55) translate(25%, 25%);
+  }
 }
 
 .top-gradient {
@@ -295,155 +422,44 @@
   z-index: 1;
 }
 
-/* Animated gradient text */
-.animated-gradient-text {
-  position: relative;
-  margin: 0 auto;
+.animated-gradient-title {
+  display: inline-block;
+  background-image: linear-gradient(
+    90deg,
+    var(--gradient-from),
+    color-mix(in srgb, var(--gradient-from) 45%, var(--gradient-to) 55%),
+    var(--gradient-to),
+    color-mix(in srgb, var(--gradient-to) 45%, var(--gradient-from) 55%),
+    var(--gradient-from)
+  );
+  background-size: 200% 100%;
+  animation: title-gradient-shift var(--gradient-speed, 2s) linear infinite;
+}
+
+@keyframes title-gradient-shift {
+  from {
+    background-position: 0% 50%;
+  }
+
+  to {
+    background-position: 200% 50%;
+  }
+}
+
+.activate-cursor {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
   display: flex;
-  max-width: fit-content;
-  flex-direction: row;
   align-items: center;
   justify-content: center;
-  border-radius: 1.25rem;
-  font-weight: 500;
-  backdrop-filter: blur(10px);
-  transition: box-shadow 0.5s ease-out;
-  overflow: hidden;
-  cursor: pointer;
 }
 
-.animated-gradient-text.with-border {
-  padding: 0.35rem 0.75rem;
-}
-
-.gradient-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  border-radius: inherit;
-  z-index: 0;
-  pointer-events: none;
-  background: conic-gradient(from 0deg, #ff6b6b, #feca57, #48dbfb, #ff9ff3, #54a0ff, #5f27cd, #ff6b6b);
-  animation: gradient-spin 3s linear infinite;
-}
-
-@keyframes gradient-spin {
-  to { transform: rotate(360deg); }
-}
-
-.gradient-overlay::before {
-  content: '';
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  width: calc(100% - 2px);
-  height: calc(100% - 2px);
-  border-radius: inherit;
-  background-color: hsl(var(--background));
-  z-index: -1;
-}
-
-.text-content {
-  display: inline-block;
-  position: relative;
-  z-index: 2;
-  background: linear-gradient(90deg, #ff6b6b, #feca57, #48dbfb, #ff9ff3, #54a0ff, #5f27cd, #ff6b6b);
-  background-size: 200% 100%;
-  animation: gradient-text-flow 3s linear infinite;
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
-}
-
-@keyframes gradient-text-flow {
-  to { background-position: 200% 0; }
-}
-
-/* Star border card */
-.star-border-container {
-  display: inline-block;
-  position: relative;
-  border-radius: 20px;
-  overflow: hidden;
-  padding: 4px;
-  background: #111;
-}
-
-.border-gradient-bottom {
-  position: absolute;
-  width: 300%;
-  height: 50%;
-  opacity: 0.7;
-  bottom: -12px;
-  right: -250%;
-  border-radius: 50%;
-  animation: star-movement-bottom 6s linear infinite alternate;
-  z-index: 0;
-}
-
-.border-gradient-top {
-  position: absolute;
-  opacity: 0.7;
-  width: 300%;
-  height: 50%;
-  top: -12px;
-  left: -250%;
-  border-radius: 50%;
-  animation: star-movement-top 6s linear infinite alternate;
-  z-index: 0;
-}
-
-.star-border-container .inner-content {
-  position: relative;
-  border: 1px solid #222;
-  background: #000;
-  border-radius: 20px;
-  z-index: 1;
-  overflow: hidden;
-}
-
-/* Color variants */
-.star-border-synchro .border-gradient-bottom,
-.star-border-synchro .border-gradient-top {
-  background: radial-gradient(circle, #ffffff, #e0e0e0, #ffffff);
-}
-
-.star-border-link .border-gradient-bottom,
-.star-border-link .border-gradient-top {
-  background: radial-gradient(circle, #3b82f6, #60a5fa, #2563eb);
-}
-
-.star-border-fusion .border-gradient-bottom,
-.star-border-fusion .border-gradient-top {
-  background: radial-gradient(circle, #a855f7, #c084fc, #7c3aed);
-}
-
-.star-border-xyz .border-gradient-bottom,
-.star-border-xyz .border-gradient-top {
-  background: radial-gradient(circle, #000000, #facc15, #000000, #eab308);
-}
-
-@keyframes star-movement-bottom {
-  0% {
-    transform: translate(0%, 0%);
-    opacity: 1;
-  }
-  100% {
-    transform: translate(-100%, 0%);
-    opacity: 0;
-  }
-}
-
-@keyframes star-movement-top {
-  0% {
-    transform: translate(0%, 0%);
-    opacity: 1;
-  }
-  100% {
-    transform: translate(100%, 0%);
-    opacity: 0;
-  }
+.activate-cursor-inner {
+  width: 112px;
+  height: 112px;
+  opacity: 0.58;
+  filter: sepia(1) saturate(6) hue-rotate(336deg) brightness(1.08);
+  mix-blend-mode: screen;
 }
