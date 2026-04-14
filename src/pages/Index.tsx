@@ -486,6 +486,7 @@ export default function Index() {
     return (
       <ComboStepVisual
         key={`${activeStepIndex}-${mode}`}
+        className={mode === 'full' ? 'h-[78dvh] w-[92vw] max-w-[1200px] overflow-hidden' : undefined}
         action={activeStep}
         stepNumber={activeStepIndex + 1}
         comment={stepComments[activeStepIndex]}

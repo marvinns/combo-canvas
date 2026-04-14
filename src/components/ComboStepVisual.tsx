@@ -56,6 +56,7 @@ type StepComment = {
 type ComboStepVisualProps = {
   action: ComboAction;
   stepNumber: number;
+  className?: string;
   comment?: StepComment;
   isCommentEditorOpen?: boolean;
   onOpenCommentEditor?: () => void;
@@ -106,6 +107,7 @@ function MaterialPlusIcon({ className }: { className?: string }) {
 export function ComboStepVisual({
   action,
   stepNumber,
+  className,
   comment,
   isCommentEditorOpen = false,
   onOpenCommentEditor,
@@ -473,7 +475,7 @@ export function ComboStepVisual({
   return (
     <div
       ref={cardRef}
-      className="border-glow-card"
+      className={cn("border-glow-card", className)}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
     >
