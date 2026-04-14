@@ -4,8 +4,9 @@ import { ComboStepVisual } from '@/components/ComboStepVisual';
 import { ComboLibrary } from '@/components/ComboLibrary';
 import { CHAIN_LINK_BG_CLASS, CHAIN_LINK_BORDER_CLASS, CHAIN_LINK_TEXT_CLASS, ChainLinkIcon, EFFECT_STYLES, EffectGlyph, PHASE_BG_CLASS, PHASE_BORDER_CLASS, PHASE_TEXT_CLASS, PhaseIcon } from '@/components/ActionIcon';
 import type { SavedCombo } from '@/lib/comboLibrary';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Expand, Minimize2, X } from 'lucide-react';
 import { AnimatedGradientText } from '@/components/AnimatedGradientText';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 const EXAMPLE_COMBO = `Special Summon [Diabellze the White Witch] from hand and send [Susurrus of the Sinful Spoils] to the Graveyard
 Activate [Susurrus of the Sinful Spoils] targeting [Diabellze the White Witch]
@@ -189,6 +190,7 @@ function sanitizePastedHtml(html: string): string {
 }
 
 export default function Index() {
+  const isMobile = useIsMobile();
   const [comboText, setComboText] = useState('');
   const [steps, setSteps] = useState<ComboAction[]>([]);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
@@ -198,8 +200,10 @@ export default function Index() {
   const [stepComments, setStepComments] = useState<Record<number, StepComment>>({});
   const [openCommentStep, setOpenCommentStep] = useState<number | null>(null);
   const [activeSavedComboId, setActiveSavedComboId] = useState<string | null>(null);
+  const [isBreakdownFullMode, setIsBreakdownFullMode] = useState(false);
   const editorRef = useRef<HTMLDivElement>(null);
   const previousHighlightedStepRef = useRef<number | null>(null);
+  const touchStartXRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (steps.length === 0) return;
@@ -271,6 +275,23 @@ export default function Index() {
     editor.innerHTML = nextHtml;
   }, [comboText]);
 
+  useEffect(() => {
+    if (!isMobile && isBreakdownFullMode) {
+      setIsBreakdownFullMode(false);
+    }
+  }, [isBreakdownFullMode, isMobile]);
+
+  useEffect(() => {
+    if (!isBreakdownFullMode) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isBreakdownFullMode]);
+
   const handleVisualize = () => {
     const parsed = parseCombo(comboText);
     setSteps(parsed);
@@ -341,6 +362,35 @@ export default function Index() {
     setJumpStepInput(String(clampedIndex + 1));
   };
 
+  const goToPreviousStep = () => {
+    setActiveStepIndex((current) => Math.max(0, current - 1));
+  };
+
+  const goToNextStep = () => {
+    setActiveStepIndex((current) => Math.min(steps.length - 1, current + 1));
+  };
+
+  const handleBreakdownTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    touchStartXRef.current = event.touches[0]?.clientX ?? null;
+  };
+
+  const handleBreakdownTouchEnd = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (touchStartXRef.current === null || !isBreakdownFullMode) return;
+
+    const endX = event.changedTouches[0]?.clientX ?? touchStartXRef.current;
+    const deltaX = endX - touchStartXRef.current;
+    touchStartXRef.current = null;
+
+    if (Math.abs(deltaX) < 48) return;
+
+    if (deltaX < 0) {
+      goToNextStep();
+      return;
+    }
+
+    goToPreviousStep();
+  };
+
   const handleAddComment = () => {
     setStepComments((current) => ({
       ...current,
@@ -378,6 +428,27 @@ export default function Index() {
         width,
       },
     }));
+  };
+
+  const activeStep = steps[activeStepIndex];
+
+  const renderBreakdownVisual = (mode: 'inline' | 'full') => {
+    if (!activeStep) return null;
+
+    return (
+      <ComboStepVisual
+        key={`${activeStepIndex}-${mode}`}
+        action={activeStep}
+        stepNumber={activeStepIndex + 1}
+        comment={stepComments[activeStepIndex]}
+        isCommentEditorOpen={openCommentStep === activeStepIndex}
+        onOpenCommentEditor={() => setOpenCommentStep(activeStepIndex)}
+        onCloseCommentEditor={() => setOpenCommentStep((current) => (current === activeStepIndex ? null : current))}
+        onCommentChange={(text) => handleCommentChange(activeStepIndex, text)}
+        onCommentPositionChange={(x, y) => handleCommentPositionChange(activeStepIndex, x, y)}
+        onCommentWidthChange={(width) => handleCommentWidthChange(activeStepIndex, width)}
+      />
+    );
   };
 
   return (
@@ -591,9 +662,21 @@ export default function Index() {
                 >
                   {stepComments[activeStepIndex] ? 'Edit Comment' : 'Add Comment'}
                 </button>
+                {isMobile && (
+                  <button
+                    type="button"
+                    onClick={() => setIsBreakdownFullMode(true)}
+                    className="rounded-full border border-border/60 bg-secondary/50 px-3 py-1 text-xs font-display font-semibold text-muted-foreground transition-all hover:bg-secondary/80 hover:text-foreground"
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <Expand className="h-3.5 w-3.5" />
+                      Full Mode
+                    </span>
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={() => setActiveStepIndex((current) => Math.max(0, current - 1))}
+                  onClick={goToPreviousStep}
                   disabled={activeStepIndex === 0}
                   className="flex h-9 w-9 items-center justify-center rounded-full border border-border/60 bg-secondary/60 text-foreground transition-all hover:bg-secondary/90 disabled:cursor-not-allowed disabled:opacity-40"
                   aria-label="Previous step"
@@ -602,7 +685,7 @@ export default function Index() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setActiveStepIndex((current) => Math.min(steps.length - 1, current + 1))}
+                  onClick={goToNextStep}
                   disabled={activeStepIndex === steps.length - 1}
                   className="flex h-9 w-9 items-center justify-center rounded-full border border-border/60 bg-secondary/60 text-foreground transition-all hover:bg-secondary/90 disabled:cursor-not-allowed disabled:opacity-40"
                   aria-label="Next step"
@@ -612,18 +695,7 @@ export default function Index() {
               </div>
             </div>
             <div className="space-y-3">
-              <ComboStepVisual
-                key={activeStepIndex}
-                action={steps[activeStepIndex]}
-                stepNumber={activeStepIndex + 1}
-                comment={stepComments[activeStepIndex]}
-                isCommentEditorOpen={openCommentStep === activeStepIndex}
-                onOpenCommentEditor={() => setOpenCommentStep(activeStepIndex)}
-                onCloseCommentEditor={() => setOpenCommentStep((current) => (current === activeStepIndex ? null : current))}
-                onCommentChange={(text) => handleCommentChange(activeStepIndex, text)}
-                onCommentPositionChange={(x, y) => handleCommentPositionChange(activeStepIndex, x, y)}
-                onCommentWidthChange={(width) => handleCommentWidthChange(activeStepIndex, width)}
-              />
+              {renderBreakdownVisual('inline')}
               <div className="flex flex-wrap justify-center gap-2">
                 {steps.map((_, index) => (
                   <button
@@ -643,6 +715,66 @@ export default function Index() {
           </div>
         )}
       </div>
+      {isMobile && isBreakdownFullMode && activeStep && (
+        <div className="fixed inset-0 z-50 bg-background/95 backdrop-blur-md">
+          <div className="flex h-full flex-col">
+            <div className="flex items-center justify-between border-b border-border/50 px-4 py-3">
+              <div className="flex items-center gap-2">
+                <span className="rounded-full border border-border/60 bg-secondary/50 px-3 py-1 text-xs font-display font-semibold text-muted-foreground">
+                  Step {activeStepIndex + 1} / {steps.length}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsBreakdownFullMode(false)}
+                  className="rounded-full border border-border/60 bg-secondary/50 px-3 py-1 text-xs font-display font-semibold text-muted-foreground transition-all hover:bg-secondary/80 hover:text-foreground"
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    <Minimize2 className="h-3.5 w-3.5" />
+                    Exit Full
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsBreakdownFullMode(false)}
+                  className="flex h-9 w-9 items-center justify-center rounded-full border border-border/60 bg-secondary/60 text-foreground transition-all hover:bg-secondary/90"
+                  aria-label="Close full mode"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+            <div className="relative flex-1 overflow-y-auto px-3 py-4">
+              <button
+                type="button"
+                onClick={goToPreviousStep}
+                disabled={activeStepIndex === 0}
+                className="absolute left-2 top-1/2 z-10 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full border border-border/60 bg-background/85 text-foreground shadow-lg backdrop-blur transition-all hover:bg-secondary/90 disabled:cursor-not-allowed disabled:opacity-35"
+                aria-label="Previous step"
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+              <button
+                type="button"
+                onClick={goToNextStep}
+                disabled={activeStepIndex === steps.length - 1}
+                className="absolute right-2 top-1/2 z-10 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full border border-border/60 bg-background/85 text-foreground shadow-lg backdrop-blur transition-all hover:bg-secondary/90 disabled:cursor-not-allowed disabled:opacity-35"
+                aria-label="Next step"
+              >
+                <ChevronRight className="h-5 w-5" />
+              </button>
+              <div
+                className="mx-auto max-w-5xl px-12"
+                onTouchStart={handleBreakdownTouchStart}
+                onTouchEnd={handleBreakdownTouchEnd}
+              >
+                {renderBreakdownVisual('full')}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       </div>
     </div>
   );
