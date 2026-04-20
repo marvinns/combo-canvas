@@ -970,6 +970,7 @@ export const EFFECT_STYLES: Record<ComboAction['type'], {
   'detach': { Icon: DetachIcon, text: 'text-yellow-200', bg: 'bg-yellow-200/10', border: 'border-yellow-200/30' },
   'reveal': { Icon: RevealIcon, text: 'text-teal-300', bg: 'bg-teal-300/10', border: 'border-teal-300/30' },
   'continuous': { Icon: ContinuousSpellTrapIcon, text: 'text-cyan-200', bg: 'bg-cyan-300/10', border: 'border-cyan-300/30' },
+  'field-spell': { Icon: Play, text: 'text-lime-300', bg: 'bg-lime-300/10', border: 'border-lime-300/30' },
   'generic': { Icon: Play, text: 'text-muted-foreground', bg: 'bg-muted/20', border: 'border-muted-foreground/30' },
 };
 
@@ -996,6 +997,7 @@ const EFFECT_HEX: Record<ComboAction['type'], string> = {
   'detach': '#fef08a',
   'reveal': '#5eead4',
   'continuous': '#a5f3fc',
+  'field-spell': '#bef264',
   'generic': '#94a3b8',
 };
 

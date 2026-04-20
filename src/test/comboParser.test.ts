@@ -153,6 +153,58 @@ describe('parseCombo target syntax', () => {
     expect(action.targetOnly).toBe(true);
     expect(action.targetCard).toBe('Card B');
   });
+
+  it('parses activate in the gy and put itself in the continuous spell and trap zone', () => {
+    const [action] = parseCombo('Activate [snake-eyes poplar] in the gy and put it in the continuous spell and trap zone');
+
+    expect(action.type).toBe('continuous');
+    expect(action.sourceCard).toBe('snake-eyes poplar');
+    expect(action.sourceZone).toBe('gy');
+    expect(action.targetCard).toBe('snake-eyes poplar');
+  });
+
+  it('parses activate to put a target in the continuous spell and trap zone and special summon itself', () => {
+    const [action] = parseCombo('Activate [snake-eyes diabellstar] to put [snake-eyes poplar] in the continuous spell and trap zone and ss itself.');
+
+    expect(action.type).toBe('continuous');
+    expect(action.labels).toEqual(['Activate', 'Continuous Spell & Trap', 'Special Summon']);
+    expect(action.sourceCard).toBe('snake-eyes diabellstar');
+    expect(action.targetCard).toBe('snake-eyes poplar');
+    expect(action.followUpCard).toBe('snake-eyes diabellstar');
+  });
+
+  it('parses activate and place in the field spell zone with source and target cards', () => {
+    const [action] = parseCombo('Activate [card A] and place [card B] in the field spell zone.');
+
+    expect(action.type).toBe('field-spell');
+    expect(action.labels).toEqual(['Activate', 'Field Spell Zone']);
+    expect(action.sourceCard).toBe('card A');
+    expect(action.targetCard).toBe('card B');
+  });
+
+  it('parses direct put in the field spell zone phrasing', () => {
+    const [action] = parseCombo('put [card] in the field spell zone.');
+
+    expect(action.type).toBe('field-spell');
+    expect(action.targetOnly).toBe(true);
+    expect(action.targetCard).toBe('card');
+  });
+
+  it('parses activate field spell phrasing', () => {
+    const [action] = parseCombo('activate field spell [card].');
+
+    expect(action.type).toBe('field-spell');
+    expect(action.targetOnly).toBe(true);
+    expect(action.targetCard).toBe('card');
+  });
+
+  it('parses use field spell phrasing', () => {
+    const [action] = parseCombo('use field spell [card].');
+
+    expect(action.type).toBe('field-spell');
+    expect(action.targetOnly).toBe(true);
+    expect(action.targetCard).toBe('card');
+  });
 });
 
 describe('parseCombo activate effect syntax', () => {
@@ -193,6 +245,25 @@ describe('parseCombo activate effect syntax', () => {
     expect(action.targetZone).toBe('hand');
   });
 
+  it('parses activate to return multiple cards without an explicit destination', () => {
+    const [action] = parseCombo('Activate [mignon] to return [marshmao] and [cupsy]');
+
+    expect(action.labels).toEqual(['Activate', 'Return']);
+    expect(action.sourceCard).toBe('mignon');
+    expect(action.targetCard).toBe('marshmao');
+    expect(action.targetCards).toEqual(['marshmao', 'cupsy']);
+    expect(action.targetZone).toBeUndefined();
+  });
+
+  it('parses activate to return multiple cards with an explicit destination', () => {
+    const [action] = parseCombo('Activate [mignon] to return [marshmao] and [cupsy] to the hand');
+
+    expect(action.labels).toEqual(['Activate', 'Return']);
+    expect(action.targetCards).toEqual(['marshmao', 'cupsy']);
+    expect(action.targetZone).toBe('hand');
+    expect(action.targetZones).toEqual(['hand', 'hand']);
+  });
+
   it('parses activate to special summon with optional source zone', () => {
     const [action] = parseCombo('Activate [Card A] to special summon [Card B] from the GY');
 
@@ -205,6 +276,49 @@ describe('parseCombo activate effect syntax', () => {
 
     expect(action.labels).toEqual(['Activate', 'Special Summon']);
     expect(action.targetZone).toBe('banished');
+  });
+
+  it('parses activate to special summon multiple cards with comma syntax', () => {
+    const [action] = parseCombo('Activate [flamberge] in the gy to ss [snake-eye oak], [snake-eye ash].');
+
+    expect(action.type).toBe('activate');
+    expect(action.labels).toEqual(['Activate', 'Special Summon']);
+    expect(action.sourceCard).toBe('flamberge');
+    expect(action.sourceZone).toBe('gy');
+    expect(action.targetCard).toBe('snake-eye oak');
+    expect(action.targetCards).toEqual(['snake-eye oak', 'snake-eye ash']);
+  });
+
+  it('parses activate to special summon multiple cards with and syntax', () => {
+    const [action] = parseCombo('Activate [flamberge] in the gy to ss [snake-eye oak] and [snake-eye ash].');
+
+    expect(action.type).toBe('activate');
+    expect(action.labels).toEqual(['Activate', 'Special Summon']);
+    expect(action.sourceCard).toBe('flamberge');
+    expect(action.sourceZone).toBe('gy');
+    expect(action.targetCard).toBe('snake-eye oak');
+    expect(action.targetCards).toEqual(['snake-eye oak', 'snake-eye ash']);
+  });
+
+  it('parses activate in the gy and special summon itself', () => {
+    const [action] = parseCombo('Activate [snake-eyes poplar] in the gy and ss itself');
+
+    expect(action.type).toBe('activate');
+    expect(action.labels).toEqual(['Activate', 'Special Summon']);
+    expect(action.sourceCard).toBe('snake-eyes poplar');
+    expect(action.sourceZone).toBe('gy');
+    expect(action.targetCard).toBe('snake-eyes poplar');
+    expect(action.targetZone).toBe('gy');
+  });
+
+  it('parses activate and special summon it from the gy as a self-summon effect', () => {
+    const [action] = parseCombo('Activate [sorrowcat] and ss it from the gy');
+
+    expect(action.type).toBe('activate');
+    expect(action.labels).toEqual(['Activate', 'Special Summon']);
+    expect(action.sourceCard).toBe('sorrowcat');
+    expect(action.targetCard).toBe('sorrowcat');
+    expect(action.targetZone).toBe('gy');
   });
 
   it('parses activate to search with compound labels', () => {
@@ -251,6 +365,30 @@ describe('parseCombo activate effect syntax', () => {
     expect(action.labels).toEqual(['Activate', 'Add to Hand']);
     expect(action.sourceCard).toBe('Flame wingman');
     expect(action.targetCard).toBe('Favorite Contact');
+  });
+
+  it('parses activate to add multiple cards to hand with and syntax', () => {
+    const [action] = parseCombo('Activate [cupsy] to add [Cupsy☆Yummy] and [cooky] to hand.');
+
+    expect(action.type).toBe('activate');
+    expect(action.label).toBe('Activate');
+    expect(action.labels).toEqual(['Activate', 'Add to Hand']);
+    expect(action.sourceCard).toBe('cupsy');
+    expect(action.targetCard).toBe('Cupsy☆Yummy');
+    expect(action.targetCards).toEqual(['Cupsy☆Yummy', 'cooky']);
+    expect(action.targetZones).toEqual(['hand', 'hand']);
+  });
+
+  it('parses activate to add multiple cards to hand with comma syntax', () => {
+    const [action] = parseCombo('Activate [cupsy] to add [Cupsy☆Yummy], [cooky] to hand');
+
+    expect(action.type).toBe('activate');
+    expect(action.label).toBe('Activate');
+    expect(action.labels).toEqual(['Activate', 'Add to Hand']);
+    expect(action.sourceCard).toBe('cupsy');
+    expect(action.targetCard).toBe('Cupsy☆Yummy');
+    expect(action.targetCards).toEqual(['Cupsy☆Yummy', 'cooky']);
+    expect(action.targetZones).toEqual(['hand', 'hand']);
   });
 
   it('parses activate to add from the deck as add to hand', () => {
@@ -335,6 +473,21 @@ describe('parseCombo activate effect syntax', () => {
     expect(action.followUpCard).toBe('Card A');
   });
 
+  it('parses activate send multiple cards to gy then special summon as a chained effect', () => {
+    const [action] = parseCombo('Activate [snake-eye ash], send [snake-eye ash] and [snake-eyes poplar] to the gy and ss [snake-eye oak] from the deck');
+
+    expect(action.type).toBe('activate');
+    expect(action.label).toBe('Activate');
+    expect(action.labels).toEqual(['Activate', 'Send to GY', 'Special Summon']);
+    expect(action.sourceCard).toBe('snake-eye ash');
+    expect(action.targetCard).toBe('snake-eye ash');
+    expect(action.targetCards).toEqual(['snake-eye ash', 'snake-eyes poplar']);
+    expect(action.targetZone).toBe('gy');
+    expect(action.targetZones).toEqual(['gy', 'gy']);
+    expect(action.followUpCard).toBe('snake-eye oak');
+    expect(action.followUpZone).toBe('deck');
+  });
+
   it('parses activate from hand to banish and special summon itself as a chained effect', () => {
     const [action] = parseCombo('Activate [dusk crow] from hand to banish [sunrise] and SS itself.');
 
@@ -369,6 +522,30 @@ describe('parseCombo activate effect syntax', () => {
     expect(action.sourceCard).toBe('vyon');
     expect(action.targetCard).toBe('shadow mist');
     expect(action.targetZone).toBe('gy');
+    expect(action.followUpCard).toBe('polymerization');
+    expect(action.followUpZone).toBe('hand');
+  });
+
+  it('parses activate special summon then add to hand as a chained effect', () => {
+    const [action] = parseCombo('Activate [Engage Neo Space] to ss [Spirit of Neos] and add [polymerization] to hand.');
+
+    expect(action.type).toBe('activate');
+    expect(action.label).toBe('Activate');
+    expect(action.labels).toEqual(['Activate', 'Special Summon', 'Add to Hand']);
+    expect(action.sourceCard).toBe('Engage Neo Space');
+    expect(action.targetCard).toBe('Spirit of Neos');
+    expect(action.followUpCard).toBe('polymerization');
+    expect(action.followUpZone).toBe('hand');
+  });
+
+  it('parses activate comma special summon then add shorthand as the same chained effect', () => {
+    const [action] = parseCombo('Activate [Engage Neo Space], ss [Spirit of Neos] and add [polymerization] to hand.');
+
+    expect(action.type).toBe('activate');
+    expect(action.label).toBe('Activate');
+    expect(action.labels).toEqual(['Activate', 'Special Summon', 'Add to Hand']);
+    expect(action.sourceCard).toBe('Engage Neo Space');
+    expect(action.targetCard).toBe('Spirit of Neos');
     expect(action.followUpCard).toBe('polymerization');
     expect(action.followUpZone).toBe('hand');
   });
@@ -813,6 +990,36 @@ describe('parseCombo summon shorthand syntax', () => {
     expect(action.type).toBe('summon');
     expect(action.label).toBe('Special Summon');
     expect(action.sourceCard).toBe('Card A');
+  });
+
+  it('parses SS of two cards with and syntax', () => {
+    const [action] = parseCombo('SS [Cupsy☆Yummy] and [Cooky☆Yummy].');
+
+    expect(action.type).toBe('summon');
+    expect(action.label).toBe('Special Summon');
+    expect(action.targetOnly).toBe(true);
+    expect(action.targetCard).toBe('Cupsy☆Yummy');
+    expect(action.targetCards).toEqual(['Cupsy☆Yummy', 'Cooky☆Yummy']);
+  });
+
+  it('parses SS of two cards with comma syntax', () => {
+    const [action] = parseCombo('SS [Cupsy☆Yummy], [Cooky☆Yummy]');
+
+    expect(action.type).toBe('summon');
+    expect(action.label).toBe('Special Summon');
+    expect(action.targetOnly).toBe(true);
+    expect(action.targetCard).toBe('Cupsy☆Yummy');
+    expect(action.targetCards).toEqual(['Cupsy☆Yummy', 'Cooky☆Yummy']);
+  });
+
+  it('does not misread summon then send phrasing as a multi-summon step', () => {
+    const [action] = parseCombo('Special Summon [Diabellze the White Witch] from hand and send [Susurrus of the Sinful Spoils] to the Graveyard');
+
+    expect(action.label).toBe('Special Summon');
+    expect(action.labels).toEqual(['Special Summon', 'Send to GY']);
+    expect(action.sourceCard).toBe('Diabellze the White Witch');
+    expect(action.sourceZone).toBe('hand');
+    expect(action.targetCard).toBe('Susurrus of the Sinful Spoils');
   });
 
   it('parses FS as fusion summon', () => {

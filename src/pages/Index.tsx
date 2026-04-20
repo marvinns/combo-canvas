@@ -3,6 +3,7 @@ import { parseCombo, type ComboAction } from '@/lib/comboParser';
 import { ComboStepVisual } from '@/components/ComboStepVisual';
 import { ComboLibrary } from '@/components/ComboLibrary';
 import { CHAIN_LINK_BG_CLASS, CHAIN_LINK_BORDER_CLASS, CHAIN_LINK_TEXT_CLASS, ChainLinkIcon, EFFECT_STYLES, EffectGlyph, PHASE_BG_CLASS, PHASE_BORDER_CLASS, PHASE_TEXT_CLASS, PhaseIcon } from '@/components/ActionIcon';
+import { updateCombo } from '@/lib/comboLibrary';
 import type { SavedCombo } from '@/lib/comboLibrary';
 import { ChevronLeft, ChevronRight, Expand, Minimize2, X } from 'lucide-react';
 import { AnimatedGradientText } from '@/components/AnimatedGradientText';
@@ -70,6 +71,17 @@ type StepComment = {
   x: number;
   y: number;
   width: number;
+};
+
+type EditorSelectionOffsets = {
+  start: number;
+  end: number;
+};
+
+type CardSuggestion = {
+  name: string;
+  count: number;
+  lastIndex: number;
 };
 
 function escapeHtml(value: string): string {
@@ -163,6 +175,80 @@ function setEditorSelectionByOffsets(container: HTMLElement, start: number, end:
   selection.addRange(range);
 }
 
+function getEditorSelectionOffsets(container: HTMLElement): EditorSelectionOffsets | null {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return null;
+
+  const range = selection.getRangeAt(0);
+  if (!container.contains(range.startContainer) || !container.contains(range.endContainer)) {
+    return null;
+  }
+
+  let currentOffset = 0;
+  let start: number | null = null;
+  let end: number | null = null;
+
+  const visit = (node: Node) => {
+    if (start !== null && end !== null) return;
+
+    if (node.nodeType === Node.TEXT_NODE) {
+      const textLength = node.textContent?.length || 0;
+      const nextOffset = currentOffset + textLength;
+
+      if (start === null && node === range.startContainer) {
+        start = currentOffset + range.startOffset;
+      }
+
+      if (end === null && node === range.endContainer) {
+        end = currentOffset + range.endOffset;
+      }
+
+      currentOffset = nextOffset;
+      return;
+    }
+
+    if (node instanceof HTMLElement && node.tagName.toLowerCase() === 'br') {
+      if (start === null && node === range.startContainer) {
+        start = currentOffset;
+      }
+
+      if (end === null && node === range.endContainer) {
+        end = currentOffset;
+      }
+
+      currentOffset += 1;
+      return;
+    }
+
+    node.childNodes.forEach(visit);
+  };
+
+  container.childNodes.forEach(visit);
+
+  if (start === null || end === null) return null;
+  return { start, end };
+}
+
+function getCardSuggestions(text: string): CardSuggestion[] {
+  const counts = new Map<string, { count: number; lastIndex: number }>();
+
+  for (const match of text.matchAll(/\[(.+?)\]/g)) {
+    const name = match[1].trim();
+    if (!name) continue;
+    const current = counts.get(name);
+    if (current) {
+      current.count += 1;
+      current.lastIndex = match.index ?? current.lastIndex;
+    } else {
+      counts.set(name, { count: 1, lastIndex: match.index ?? 0 });
+    }
+  }
+
+  return Array.from(counts.entries())
+    .map(([name, meta]) => ({ name, ...meta }))
+    .sort((a, b) => b.count - a.count || b.lastIndex - a.lastIndex || a.name.localeCompare(b.name));
+}
+
 function sanitizePastedHtml(html: string): string {
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, 'text/html');
@@ -189,6 +275,21 @@ function sanitizePastedHtml(html: string): string {
   return Array.from(doc.body.childNodes).map(serializeNode).join('').replace(/(<br>)+$/, '');
 }
 
+function matchesShortcut(event: KeyboardEvent, options: {
+  code?: string;
+  key?: string;
+  altKey?: boolean;
+  metaKey?: boolean;
+  ctrlKey?: boolean;
+}) {
+  if (options.altKey !== undefined && event.altKey !== options.altKey) return false;
+  if (options.metaKey !== undefined && event.metaKey !== options.metaKey) return false;
+  if (options.ctrlKey !== undefined && event.ctrlKey !== options.ctrlKey) return false;
+  if (options.code && event.code === options.code) return true;
+  if (options.key && event.key.toLowerCase() === options.key.toLowerCase()) return true;
+  return false;
+}
+
 export default function Index() {
   const isMobile = useIsMobile();
   const [comboText, setComboText] = useState('');
@@ -200,11 +301,30 @@ export default function Index() {
   const [stepComments, setStepComments] = useState<Record<number, StepComment>>({});
   const [openCommentStep, setOpenCommentStep] = useState<number | null>(null);
   const [activeSavedComboId, setActiveSavedComboId] = useState<string | null>(null);
+  const [lastSavedCombo, setLastSavedCombo] = useState<SavedCombo | null>(null);
   const [isBreakdownFullMode, setIsBreakdownFullMode] = useState(false);
+  const [activeCardSuggestions, setActiveCardSuggestions] = useState<CardSuggestion[]>([]);
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0);
+  const [activeSuggestionRange, setActiveSuggestionRange] = useState<{ start: number; end: number } | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
   const previousHighlightedStepRef = useRef<number | null>(null);
   const touchStartXRef = useRef<number | null>(null);
   const fullModeContainerRef = useRef<HTMLDivElement>(null);
+  const comboTextRef = useRef(comboText);
+  const stepsRef = useRef(steps);
+  const activeSavedComboIdRef = useRef(activeSavedComboId);
+
+  useEffect(() => {
+    comboTextRef.current = comboText;
+  }, [comboText]);
+
+  useEffect(() => {
+    stepsRef.current = steps;
+  }, [steps]);
+
+  useEffect(() => {
+    activeSavedComboIdRef.current = activeSavedComboId;
+  }, [activeSavedComboId]);
 
   useEffect(() => {
     if (steps.length === 0) return;
@@ -233,6 +353,72 @@ export default function Index() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [steps.length]);
+
+  useEffect(() => {
+    const handleShortcutKeyDown = (event: KeyboardEvent) => {
+      if (
+        matchesShortcut(event, { metaKey: true, code: 'KeyS' }) ||
+        matchesShortcut(event, { metaKey: true, key: 's' })
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        const currentComboId = activeSavedComboIdRef.current;
+        const currentComboText = comboTextRef.current;
+        if (!currentComboId || !currentComboText.trim()) return;
+        const updatedCombo = updateCombo(currentComboId, { text: currentComboText });
+        if (updatedCombo) {
+          setActiveSavedComboId(updatedCombo.id);
+          setLastSavedCombo(updatedCombo);
+        }
+        return;
+      }
+
+      if (
+        matchesShortcut(event, { altKey: true, metaKey: false, ctrlKey: false, code: 'KeyV' }) ||
+        matchesShortcut(event, { altKey: true, metaKey: false, ctrlKey: false, key: 'v' }) ||
+        matchesShortcut(event, { altKey: true, metaKey: false, ctrlKey: false, key: '√' })
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        const parsed = parseCombo(comboTextRef.current);
+        setSteps(parsed);
+        setActiveStepIndex(0);
+        setJumpStepInput('');
+        setStepComments({});
+        setOpenCommentStep(null);
+        return;
+      }
+
+      if (
+        matchesShortcut(event, { altKey: true, metaKey: false, ctrlKey: false, code: 'KeyZ' }) ||
+        matchesShortcut(event, { altKey: true, metaKey: false, ctrlKey: false, key: 'z' }) ||
+        matchesShortcut(event, { altKey: true, metaKey: false, ctrlKey: false, key: 'Ω' })
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        const currentSteps = stepsRef.current;
+        const parsed = currentSteps.length > 0 ? currentSteps : parseCombo(comboTextRef.current);
+        if (parsed.length === 0) return;
+
+        if (currentSteps.length === 0) {
+          setSteps(parsed);
+          setStepComments({});
+          setOpenCommentStep(null);
+        }
+
+        const lastStepIndex = parsed.length - 1;
+        setActiveStepIndex(lastStepIndex);
+        setJumpStepInput(String(lastStepIndex + 1));
+      }
+    };
+
+    document.addEventListener('keydown', handleShortcutKeyDown, true);
+    window.addEventListener('keydown', handleShortcutKeyDown, true);
+    return () => {
+      document.removeEventListener('keydown', handleShortcutKeyDown, true);
+      window.removeEventListener('keydown', handleShortcutKeyDown, true);
+    };
+  }, []);
 
   useEffect(() => {
     if (steps.length === 0) return;
@@ -281,6 +467,71 @@ export default function Index() {
       setIsBreakdownFullMode(false);
     }
   }, [isBreakdownFullMode, isMobile]);
+
+  const closeCardSuggestions = () => {
+    setActiveCardSuggestions([]);
+    setActiveSuggestionIndex(0);
+    setActiveSuggestionRange(null);
+  };
+
+  const refreshCardSuggestions = (text: string) => {
+    const editor = editorRef.current;
+    if (!editor) {
+      closeCardSuggestions();
+      return;
+    }
+
+    const selectionOffsets = getEditorSelectionOffsets(editor);
+    if (!selectionOffsets || selectionOffsets.start !== selectionOffsets.end) {
+      closeCardSuggestions();
+      return;
+    }
+
+    const beforeCursor = text.slice(0, selectionOffsets.start);
+    const bracketMatch = beforeCursor.match(/\[([^\]\n]*)$/);
+    if (!bracketMatch) {
+      closeCardSuggestions();
+      return;
+    }
+
+    const query = bracketMatch[1];
+    const suggestionStart = selectionOffsets.start - query.length;
+    const normalizedQuery = query.trim().toLowerCase();
+    const suggestions = getCardSuggestions(text)
+      .filter(({ name }) => !normalizedQuery || name.toLowerCase().startsWith(normalizedQuery))
+      .slice(0, 6);
+
+    if (suggestions.length === 0) {
+      closeCardSuggestions();
+      return;
+    }
+
+    setActiveCardSuggestions(suggestions);
+    setActiveSuggestionIndex(0);
+    setActiveSuggestionRange({ start: suggestionStart, end: selectionOffsets.end });
+  };
+
+  const applyCardSuggestion = (suggestionName: string) => {
+    const editor = editorRef.current;
+    if (!editor || !activeSuggestionRange) return;
+
+    const hasClosingBracket = comboText[activeSuggestionRange.end] === ']';
+    const insertedText = hasClosingBracket ? suggestionName : `${suggestionName}]`;
+    const nextText =
+      comboText.slice(0, activeSuggestionRange.start) +
+      insertedText +
+      comboText.slice(activeSuggestionRange.end);
+    const caretOffset = activeSuggestionRange.start + insertedText.length;
+
+    setComboText(nextText);
+    requestAnimationFrame(() => {
+      const currentEditor = editorRef.current;
+      if (!currentEditor) return;
+      currentEditor.focus();
+      setEditorSelectionByOffsets(currentEditor, caretOffset, caretOffset);
+      refreshCardSuggestions(nextText);
+    });
+  };
 
   useEffect(() => {
     if (!isBreakdownFullMode) return;
@@ -380,6 +631,7 @@ export default function Index() {
     setStepComments({});
     setOpenCommentStep(null);
     setActiveSavedComboId(null);
+    setLastSavedCombo(null);
   };
 
   const handleLoadCombo = (combo: SavedCombo) => {
@@ -390,6 +642,7 @@ export default function Index() {
     setStepComments({});
     setOpenCommentStep(null);
     setActiveSavedComboId(combo.id);
+    setLastSavedCombo(combo);
   };
 
   const handleJumpToStep = () => {
@@ -534,8 +787,41 @@ export default function Index() {
               ref={editorRef}
               contentEditable
               suppressContentEditableWarning
-              onInput={(e) => setComboText(editorHtmlToComboText(e.currentTarget))}
+              onInput={(e) => {
+                const nextText = editorHtmlToComboText(e.currentTarget);
+                setComboText(nextText);
+                refreshCardSuggestions(nextText);
+              }}
               onKeyDown={(e) => {
+                if (activeCardSuggestions.length > 0) {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setActiveSuggestionIndex((current) => (current + 1) % activeCardSuggestions.length);
+                    return;
+                  }
+
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setActiveSuggestionIndex((current) => (current - 1 + activeCardSuggestions.length) % activeCardSuggestions.length);
+                    return;
+                  }
+
+                  if (e.key === 'Enter' || e.key === 'Tab') {
+                    e.preventDefault();
+                    const selectedSuggestion = activeCardSuggestions[activeSuggestionIndex];
+                    if (selectedSuggestion) {
+                      applyCardSuggestion(selectedSuggestion.name);
+                    }
+                    return;
+                  }
+
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closeCardSuggestions();
+                    return;
+                  }
+                }
+
                 if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
                   e.preventDefault();
                   document.execCommand('bold');
@@ -550,6 +836,15 @@ export default function Index() {
                   document.execCommand('insertLineBreak');
                 }
               }}
+              onKeyUp={(e) => refreshCardSuggestions(editorHtmlToComboText(e.currentTarget))}
+              onClick={(e) => refreshCardSuggestions(editorHtmlToComboText(e.currentTarget))}
+              onBlur={() => {
+                requestAnimationFrame(() => {
+                  const activeElement = document.activeElement as HTMLElement | null;
+                  if (activeElement?.dataset.comboSuggestion === 'true') return;
+                  closeCardSuggestions();
+                });
+              }}
               onPaste={(e) => {
                 e.preventDefault();
                 const html = e.clipboardData.getData('text/html');
@@ -562,11 +857,38 @@ export default function Index() {
 
                 const editor = editorRef.current;
                 if (editor) {
-                  setComboText(editorHtmlToComboText(editor));
+                  const nextText = editorHtmlToComboText(editor);
+                  setComboText(nextText);
+                  refreshCardSuggestions(nextText);
                 }
               }}
               className="h-36 overflow-y-auto whitespace-pre-wrap rounded-lg border border-border bg-secondary/50 p-4 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/50"
             />
+            {activeCardSuggestions.length > 0 && (
+              <div className="absolute inset-x-4 bottom-4 z-20 rounded-xl border border-lime-300/30 bg-background/95 p-2 shadow-2xl backdrop-blur">
+                <div className="mb-1 px-2 text-[10px] font-display font-semibold uppercase tracking-[0.18em] text-lime-300/80">
+                  Card Suggestions
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {activeCardSuggestions.map((suggestion, index) => (
+                    <button
+                      key={`${suggestion.name}-${suggestion.count}-${index}`}
+                      type="button"
+                      data-combo-suggestion="true"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => applyCardSuggestion(suggestion.name)}
+                      className={`rounded-full border px-3 py-1 text-xs font-body transition-all ${
+                        index === activeSuggestionIndex
+                          ? 'border-lime-300/50 bg-lime-300/15 text-lime-100'
+                          : 'border-border/60 bg-secondary/60 text-muted-foreground hover:border-lime-300/40 hover:text-foreground'
+                      }`}
+                    >
+                      [{suggestion.name}]
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
           <div className="flex gap-3">
             <button
@@ -667,8 +989,12 @@ export default function Index() {
               <ComboLibrary
                 currentText={comboText}
                 activeComboId={activeSavedComboId}
+                externalSavedCombo={lastSavedCombo}
                 onLoad={handleLoadCombo}
-                onSave={(combo) => setActiveSavedComboId(combo.id)}
+                onSave={(combo) => {
+                  setActiveSavedComboId(combo.id);
+                  setLastSavedCombo(combo);
+                }}
               />
             </div>
           )}

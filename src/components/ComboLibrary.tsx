@@ -1,14 +1,36 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { getSavedCombos, saveCombo, updateCombo, renameDeck, duplicateCombo, deleteCombo, type SavedCombo } from '@/lib/comboLibrary';
 
 interface ComboLibraryProps {
   currentText: string;
   activeComboId?: string | null;
+  externalSavedCombo?: SavedCombo | null;
   onLoad: (combo: SavedCombo) => void;
   onSave?: (combo: SavedCombo) => void;
 }
 
-export function ComboLibrary({ currentText, activeComboId, onLoad, onSave }: ComboLibraryProps) {
+const DECK_NAME_STYLES = [
+  'text-rose-300',
+  'text-amber-300',
+  'text-emerald-300',
+  'text-sky-300',
+  'text-cyan-300',
+  'text-violet-300',
+  'text-fuchsia-300',
+  'text-orange-300',
+] as const;
+
+function getDeckNameStyle(deck: string) {
+  let hash = 0;
+
+  for (let index = 0; index < deck.length; index += 1) {
+    hash = (hash * 31 + deck.charCodeAt(index)) >>> 0;
+  }
+
+  return DECK_NAME_STYLES[hash % DECK_NAME_STYLES.length];
+}
+
+export function ComboLibrary({ currentText, activeComboId, externalSavedCombo, onLoad, onSave }: ComboLibraryProps) {
   const [combos, setCombos] = useState<SavedCombo[]>(getSavedCombos);
   const [saveDeck, setSaveDeck] = useState('');
   const [saveName, setSaveName] = useState('');
@@ -23,6 +45,19 @@ export function ComboLibrary({ currentText, activeComboId, onLoad, onSave }: Com
   const visibleCombos = selectedDeck === 'all'
     ? combos
     : combos.filter((combo) => combo.deck === selectedDeck);
+
+  useEffect(() => {
+    if (!externalSavedCombo) return;
+
+    setCombos((current) => {
+      const existingIndex = current.findIndex((combo) => combo.id === externalSavedCombo.id);
+      if (existingIndex === -1) {
+        return [externalSavedCombo, ...current];
+      }
+
+      return current.map((combo) => combo.id === externalSavedCombo.id ? externalSavedCombo : combo);
+    });
+  }, [externalSavedCombo]);
 
   const handleSave = () => {
     if (!saveDeck.trim() || !saveName.trim() || !currentText.trim()) return;
@@ -242,7 +277,7 @@ export function ComboLibrary({ currentText, activeComboId, onLoad, onSave }: Com
                       onClick={() => onLoad(combo)}
                       className="flex-1 text-left min-w-0"
                     >
-                      <span className="text-[11px] text-accent/80 font-display font-semibold uppercase tracking-wide block truncate">
+                      <span className={`text-[11px] font-display font-semibold uppercase tracking-wide block truncate ${getDeckNameStyle(combo.deck)}`}>
                         {combo.deck}
                       </span>
                       <span className="item-text font-display font-semibold text-sm block truncate">

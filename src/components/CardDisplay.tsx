@@ -34,6 +34,7 @@ const CARD_STATUS_STYLES: Record<CardStatus, { label: string; text: string; bg: 
   detach: { label: 'Detached', text: 'text-yellow-200', bg: 'bg-yellow-200/10', border: 'border-yellow-200/30' },
   reveal: { label: 'Revealed', text: 'text-teal-300', bg: 'bg-teal-300/10', border: 'border-teal-300/30' },
   continuous: { label: '', text: 'text-cyan-200', bg: 'bg-cyan-300/10', border: 'border-cyan-300/30', iconType: 'continuous', symbolOnly: true },
+  'field-spell': { label: 'Field Spell Zone', text: 'text-lime-300', bg: 'bg-lime-300/10', border: 'border-lime-300/30' },
   generic: { label: 'Affected', text: 'text-muted-foreground', bg: 'bg-muted/20', border: 'border-muted-foreground/30' },
 };
 

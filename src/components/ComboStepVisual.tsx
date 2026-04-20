@@ -8,6 +8,7 @@ import { ActionIcon, ActionArrow, ChainLinkIcon, CHAIN_LINK_BG_CLASS, CHAIN_LINK
 
 const LABEL_TYPES: Record<string, ComboAction['type']> = {
   'Continuous Spell & Trap': 'continuous',
+  'Field Spell Zone': 'field-spell',
   'Special Summon': 'summon',
   'Ritual Summon': 'ritual',
   'Normal Summon': 'summon',
@@ -41,7 +42,7 @@ const CASCADE_SUMMON_TYPES = new Set<ComboAction['type']>(['fusion', 'ritual', '
 const TARGET_CASCADE_TYPES = new Set<ComboAction['type']>(['negate', 'destroy', 'tribute', 'banish', 'send-gy', 'return']);
 const NORMAL_SUMMON_COLOR = { text: 'text-amber-700', bg: 'bg-amber-700/15', border: 'border-amber-700/40' };
 const TARGET_ONLY_STATUS_EFFECTS = new Set<ComboAction['type']>(['send-gy', 'banish', 'negate', 'destroy', 'return', 'tribute']);
-const HIDDEN_STEP_LABELS = new Set(['Continuous Spell & Trap']);
+const HIDDEN_STEP_LABELS = new Set(['Continuous Spell & Trap', 'Field Spell Zone']);
 const COMMENT_TEXT_CLASS = 'text-emerald-300';
 const COMMENT_BG_CLASS = 'bg-emerald-300/10';
 const COMMENT_BORDER_CLASS = 'border-emerald-300/30';
@@ -121,6 +122,8 @@ export function ComboStepVisual({
   const [draftComment, setDraftComment] = useState('');
   const [isDraggingComment, setIsDraggingComment] = useState(false);
   const [isCommentHovered, setIsCommentHovered] = useState(false);
+  const [commentEditorHeight, setCommentEditorHeight] = useState(0);
+  const [commentPreviewHeight, setCommentPreviewHeight] = useState(0);
   const dragOffsetRef = useRef({ x: 0, y: 0 });
   const rawLabels = action.labels && action.labels.length > 0 ? action.labels : [action.label];
   const labelsToRender = rawLabels.filter((label) => !HIDDEN_STEP_LABELS.has(label));
@@ -177,6 +180,7 @@ export function ComboStepVisual({
   const isTargetIntoFollowUpSpecialSummonStep =
     labelsToRender.includes('Activate') &&
     labelsToRender.includes('Special Summon') &&
+    !labelsToRender.includes('Add to Hand') &&
     cardEffects.some((type) => type !== 'activate' && type !== 'summon') &&
     Boolean(action.followUpCard);
   const isActivateTargetSpecialSummonStep =
@@ -201,6 +205,12 @@ export function ComboStepVisual({
     labelsToRender.includes('Activate') &&
     labelsToRender.includes('Reveal') &&
     labelsToRender.includes('Special Summon') &&
+    Boolean(action.followUpCard);
+  const isActivateSummonAddStep =
+    labelsToRender.includes('Activate') &&
+    labelsToRender.includes('Special Summon') &&
+    labelsToRender.includes('Add to Hand') &&
+    Boolean(action.targetCard) &&
     Boolean(action.followUpCard);
   const isActivateBanishAddStep =
     labelsToRender.includes('Activate') &&
@@ -236,10 +246,13 @@ export function ComboStepVisual({
   const targetCascadeEffectType = TARGET_CASCADE_TYPES.has(action.type)
     ? action.type
     : cardEffects.find((type) => TARGET_CASCADE_TYPES.has(type));
-  const shouldUseTargetCascadeStack = Boolean(targetCascadeEffectType) && targetCards.length > 2;
+  const shouldUseTargetCascadeStack = Boolean(targetCascadeEffectType) && (
+    targetCards.length > 2 ||
+    (isTargetIntoFollowUpSpecialSummonStep && targetCascadeEffectType === 'send-gy' && targetCards.length > 1)
+  );
   const isScaleStep = action.type === 'scale' && sourceCards.length >= 1;
   const sourceEffects = cardEffects.filter((type) => {
-    if (type === 'activate' || STATUS_EFFECTS.has(type)) return false;
+    if (type === 'activate' || type === 'continuous' || type === 'field-spell' || STATUS_EFFECTS.has(type)) return false;
     if (isCompoundActivateStep && !isSelfSpecialSummonSetupStep && !isSelfReturnIntoFollowUpSpecialSummonStep) return false;
     if ((isMultiMaterialSummon || isActivateFusionStep) && type === action.type) return false;
     if (isScaleStep && type === 'scale') return false;
@@ -248,7 +261,7 @@ export function ComboStepVisual({
     return true;
   });
   const sourceHasActivation = cardEffects.includes('activate');
-  const statusEffects = cardEffects.filter((type) => STATUS_EFFECTS.has(type) || type === 'continuous');
+  const statusEffects = cardEffects.filter((type) => STATUS_EFFECTS.has(type) || type === 'continuous' || type === 'field-spell');
   const summonStatus = isSpecialSummonStep ? 'special-summon' : isNormalSummonStep ? 'normal-summon' : null;
   const nonSummonStatusEffects = statusEffects.filter((type) => type !== 'summon');
   const sourceStatuses = action.targetCard
@@ -270,6 +283,8 @@ export function ComboStepVisual({
             : []),
         ...nonSummonStatusEffects.filter(
           (type) =>
+            type !== 'continuous' &&
+            type !== 'field-spell' &&
             type !== 'send-gy' &&
             !(targetCards.length > 0 && !isSelfSpecialSummonSetupStep && TARGET_ONLY_STATUS_EFFECTS.has(type)),
         ),
@@ -312,6 +327,7 @@ export function ComboStepVisual({
     ? secondaryEffectTypes.filter(
         (type) =>
           type !== 'target' &&
+          type !== 'field-spell' &&
           type !== 'summon' &&
           !isSelfSpecialSummonSetupStep,
       )
@@ -319,6 +335,7 @@ export function ComboStepVisual({
   const cardRef = useRef<HTMLDivElement>(null);
   const commentButtonRef = useRef<HTMLButtonElement>(null);
   const commentEditorRef = useRef<HTMLDivElement>(null);
+  const commentPreviewRef = useRef<HTMLDivElement>(null);
   const targetMarker = (
     <div className={`rounded-full border bg-secondary/90 p-1.5 ${EFFECT_STYLES.target.border}`}>
       <LocateFixed className={`h-4 w-4 ${EFFECT_STYLES.target.text}`} strokeWidth={2.4} />
@@ -398,6 +415,30 @@ export function ComboStepVisual({
   }, [comment, isCommentEditorOpen, onCommentWidthChange]);
 
   useEffect(() => {
+    if (!isCommentEditorOpen || !commentEditorRef.current) return;
+
+    const editor = commentEditorRef.current;
+    const updateHeight = () => setCommentEditorHeight(editor.getBoundingClientRect().height);
+    updateHeight();
+
+    const resizeObserver = new ResizeObserver(() => updateHeight());
+    resizeObserver.observe(editor);
+    return () => resizeObserver.disconnect();
+  }, [comment?.width, draftComment, isCommentEditorOpen]);
+
+  useEffect(() => {
+    if (!isCommentHovered || isCommentEditorOpen || !commentPreviewRef.current || !comment?.text.trim()) return;
+
+    const preview = commentPreviewRef.current;
+    const updateHeight = () => setCommentPreviewHeight(preview.getBoundingClientRect().height);
+    updateHeight();
+
+    const resizeObserver = new ResizeObserver(() => updateHeight());
+    resizeObserver.observe(preview);
+    return () => resizeObserver.disconnect();
+  }, [comment?.text, comment?.width, isCommentEditorOpen, isCommentHovered]);
+
+  useEffect(() => {
     if (!isCommentEditorOpen) return;
 
     const handlePointerDown = (event: PointerEvent) => {
@@ -428,6 +469,37 @@ export function ComboStepVisual({
       y: Math.max(60, Math.min(y, containerRect.height - buttonHeight - 12)),
     };
   }, []);
+
+  const getCommentPanelPosition = useCallback((panelWidth: number, panelHeight: number) => {
+    const container = cardRef.current;
+    const button = commentButtonRef.current;
+
+    if (!container || !comment) {
+      return { left: 0, top: 0 };
+    }
+
+    const containerRect = container.getBoundingClientRect();
+    const buttonRect = button?.getBoundingClientRect();
+    const buttonWidth = buttonRect?.width ?? 44;
+    const buttonHeight = buttonRect?.height ?? 44;
+    const gap = 12;
+    const padding = 12;
+    const maxLeft = Math.max(padding, containerRect.width - panelWidth - padding);
+    const maxTop = Math.max(padding, containerRect.height - panelHeight - padding);
+    const preferredRight = comment.x + buttonWidth + gap;
+    const preferredLeft = comment.x - panelWidth - gap;
+    const centeredTop = comment.y + (buttonHeight - panelHeight) / 2;
+
+    const nextLeft = preferredRight <= maxLeft ? preferredRight : preferredLeft;
+
+    return {
+      left: Math.max(padding, Math.min(nextLeft, maxLeft)),
+      top: Math.max(padding, Math.min(centeredTop, maxTop)),
+    };
+  }, [comment]);
+
+  const commentPreviewPosition = getCommentPanelPosition(comment?.width ?? 260, commentPreviewHeight);
+  const commentEditorPosition = getCommentPanelPosition(comment?.width ?? 260, commentEditorHeight);
 
   const handleCommentPointerDown = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
     if (!comment) return;
@@ -508,10 +580,11 @@ export function ComboStepVisual({
           </button>
           {!isCommentEditorOpen && isCommentHovered && comment.text.trim().length > 0 && (
             <div
+              ref={commentPreviewRef}
               className="pointer-events-none absolute z-20 max-w-[520px] rounded-2xl border border-white/10 bg-background/30 p-3 shadow-2xl backdrop-blur-md"
               style={{
-                left: `${Math.min(comment.x + 52, 420)}px`,
-                top: `${Math.max(comment.y - 8, 72)}px`,
+                left: `${commentPreviewPosition.left}px`,
+                top: `${commentPreviewPosition.top}px`,
                 width: `${comment.width}px`,
               }}
             >
@@ -528,8 +601,8 @@ export function ComboStepVisual({
               ref={commentEditorRef}
               className="absolute z-20 min-w-[180px] max-w-[520px] resize-x overflow-auto rounded-2xl border border-white/10 bg-background/35 p-3 shadow-2xl backdrop-blur-md"
               style={{
-                left: `${Math.min(comment.x + 52, 420)}px`,
-                top: `${Math.max(comment.y - 8, 72)}px`,
+                left: `${commentEditorPosition.left}px`,
+                top: `${commentEditorPosition.top}px`,
                 width: `${comment.width}px`,
               }}
             >
@@ -607,14 +680,30 @@ export function ComboStepVisual({
         {/* Visual */}
         <div className="flex items-start justify-center gap-2 flex-wrap">
           {action.targetOnly && action.targetCard && (
-            <CardDisplay
-              name={action.targetCard}
-              actionType={action.type}
-              useStarBorder
-              zone={action.targetZone}
-              statuses={action.type === 'continuous' ? ['continuous'] : []}
-              topLeftOverlay={usesTargetEffect ? targetMarker : undefined}
-            />
+            targetCards.length > 1 ? (
+              <div className="flex flex-wrap items-start justify-center gap-3">
+                {targetCards.map((cardName, index) => (
+                  <CardDisplay
+                    key={`${cardName}-${index}`}
+                    name={cardName}
+                    actionType={action.type}
+                    useStarBorder
+                    zone={targetZones[index]}
+                    statuses={action.type === 'continuous' ? ['continuous'] : action.type === 'field-spell' ? ['field-spell'] : action.type === 'summon' && labelsToRender.includes('Special Summon') ? ['special-summon'] : []}
+                    topLeftOverlay={usesTargetEffect ? targetMarker : undefined}
+                  />
+                ))}
+              </div>
+            ) : (
+              <CardDisplay
+                name={action.targetCard}
+                actionType={action.type}
+                useStarBorder
+                zone={action.targetZone}
+                statuses={action.type === 'continuous' ? ['continuous'] : action.type === 'field-spell' ? ['field-spell'] : action.type === 'summon' && labelsToRender.includes('Special Summon') ? ['special-summon'] : []}
+                topLeftOverlay={usesTargetEffect ? targetMarker : undefined}
+              />
+            )
           )}
 
           {!action.targetOnly && isScaleStep && (
@@ -847,6 +936,32 @@ export function ComboStepVisual({
             </>
           )}
 
+          {isActivateSummonAddStep && action.targetCard && action.followUpCard && (
+            <>
+              <div className="flex h-[275px] items-center self-start" style={sourceCascadeRightStyle}>
+                <ActionArrow type="summon" />
+              </div>
+              <CardDisplay
+                name={action.targetCard}
+                actionType="summon"
+                zone={action.targetZone}
+                statuses={['special-summon']}
+              />
+              <div className="flex flex-col items-center gap-2 self-center">
+                <div className="flex min-h-8 items-center justify-center gap-2">
+                  <ActionIcon type="search" />
+                </div>
+                <ActionArrow type="search" />
+              </div>
+              <CardDisplay
+                name={action.followUpCard}
+                actionType="search"
+                zone={action.followUpZone}
+                statuses={[]}
+              />
+            </>
+          )}
+
           {isTargetIntoFollowUpSpecialSummonStep && !isActivateAddThenDiscardStep && !isActivateBanishAddStep && !isSelfReturnIntoFollowUpSpecialSummonStep && action.targetCard && action.followUpCard && chainedPrimaryEffectType && (
             <>
               <div className="flex flex-col items-center gap-2 self-center" style={sourceCascadeRightStyle}>
@@ -911,7 +1026,7 @@ export function ComboStepVisual({
             </>
           )}
 
-          {!isActivateRevealAddStep && !isActivateAddThenDiscardStep && !isActivateBanishAddStep && !isTargetIntoFollowUpSpecialSummonStep && !isActivateFusionStep && targetCards.length > 0 && (
+          {!isActivateRevealAddStep && !isActivateAddThenDiscardStep && !isActivateBanishAddStep && !isActivateSummonAddStep && !isTargetIntoFollowUpSpecialSummonStep && !isActivateFusionStep && targetCards.length > 0 && (
             <>
               <div
                 className={
