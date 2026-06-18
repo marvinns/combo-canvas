@@ -990,6 +990,7 @@ const EFFECT_HEX: Record<ComboAction['type'], string> = {
   'synchro': '#6ee7b7',
   'fusion': '#c084fc',
   'pendulum': '#a855f7',
+  'scale': '#e879f9',
   'return': '#22d3ee',
   'negate': '#f87171',
   'destroy': '#ef4444',

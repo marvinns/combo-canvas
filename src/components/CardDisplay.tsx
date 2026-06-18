@@ -1,12 +1,51 @@
-import type { ReactNode } from 'react';
-import { useCardImage } from '@/hooks/useCardImage';
+import { createContext, useContext, useEffect, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useCardImage, useRelatedCards } from '@/hooks/useCardImage';
 import type { CardZone, ComboAction } from '@/lib/comboParser';
 import { cn } from '@/lib/utils';
-import { motion } from 'motion/react';
-import { LayersPlus, Skull } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
+import { LayersPlus, Plus, Skull } from 'lucide-react';
 import { EFFECT_STYLES, EffectGlyph } from './ActionIcon';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog';
 
 type CardStatus = ComboAction['type'] | 'special-summon' | 'normal-summon';
+export type CardDisplaySize = 'default' | 'desktop-full';
+const CardDisplaySizeContext = createContext<CardDisplaySize>('default');
+const CARD_CYCLE_INTERVAL_MS = 2000;
+
+function getSlotCardNames(name: string): string[] {
+  const cardNames = name.split('|').map((cardName) => cardName.trim()).filter(Boolean);
+  return cardNames.length > 1 ? cardNames : [name];
+}
+
+export function CardDisplaySizeProvider({
+  size,
+  children,
+}: {
+  size: CardDisplaySize;
+  children: ReactNode;
+}) {
+  return (
+    <CardDisplaySizeContext.Provider value={size}>
+      {children}
+    </CardDisplaySizeContext.Provider>
+  );
+}
+
+function getCardDimensions(size: CardDisplaySize) {
+  return size === 'desktop-full'
+    ? {
+        width: 176,
+        height: 257,
+        leftRailMinHeight: 257,
+        leftRailWidth: 48,
+      }
+    : {
+        width: 140,
+        height: 204,
+        leftRailMinHeight: 204,
+        leftRailWidth: 40,
+      };
+}
 
 const CARD_STATUS_STYLES: Record<CardStatus, { label: string; text: string; bg: string; border: string; iconType?: ComboAction['type']; symbolOnly?: boolean }> = {
   summon: { label: 'Summon', text: 'text-pink-400', bg: 'bg-pink-400/10', border: 'border-pink-400/30' },
@@ -156,9 +195,11 @@ const ZONE_META: Record<CardZone, { label: string; className: string; Icon?: typ
 
 export function CardDisplay({
   name,
+  customTag,
   actionType,
   useStarBorder = true,
   zone,
+  originZone,
   statuses = [],
   leftEffectTypes = [],
   isActivated = false,
@@ -166,11 +207,14 @@ export function CardDisplay({
   topLeftOverlay,
   compact = false,
   showZoneBadge = true,
+  size,
 }: {
   name: string;
+  customTag?: string;
   actionType?: ComboAction['type'];
   useStarBorder?: boolean;
   zone?: CardZone;
+  originZone?: CardZone;
   statuses?: CardStatus[];
   leftEffectTypes?: ComboAction['type'][];
   isActivated?: boolean;
@@ -178,9 +222,62 @@ export function CardDisplay({
   topLeftOverlay?: ReactNode;
   compact?: boolean;
   showZoneBadge?: boolean;
+  size?: CardDisplaySize;
 }) {
-  const { data, isLoading } = useCardImage(name);
+  const slotCardNames = getSlotCardNames(name);
+  const [activeCardIndex, setActiveCardIndex] = useState(0);
+  const activeCardName = slotCardNames[activeCardIndex] || slotCardNames[0];
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [previewCardName, setPreviewCardName] = useState(activeCardName);
+  const [showRelatedCards, setShowRelatedCards] = useState(false);
+  const { data, isLoading } = useCardImage(activeCardName);
+  const { data: previewData, isLoading: isPreviewLoading } = useCardImage(previewCardName);
+  const {
+    data: relatedCardsData,
+    isLoading: areRelatedCardsLoading,
+  } = useRelatedCards(previewData?.name || previewCardName, isPreviewOpen && showRelatedCards);
   const zoneMeta = zone ? ZONE_META[zone] : undefined;
+  const originZoneMeta = originZone ? ZONE_META[originZone] : undefined;
+  const cardLabel = data?.name || activeCardName;
+  const previewCardLabel = previewData?.name || previewCardName;
+  const isPreviewEnabled = !compact;
+  const inheritedSize = useContext(CardDisplaySizeContext);
+  const resolvedSize = size ?? inheritedSize;
+  const dimensions = getCardDimensions(resolvedSize);
+
+  useEffect(() => {
+    setActiveCardIndex(0);
+  }, [name]);
+
+  useEffect(() => {
+    if (slotCardNames.length < 2) return;
+
+    const interval = window.setInterval(() => {
+      setActiveCardIndex((current) => (current + 1) % slotCardNames.length);
+    }, CARD_CYCLE_INTERVAL_MS);
+
+    return () => window.clearInterval(interval);
+  }, [name, slotCardNames.length]);
+
+  useEffect(() => {
+    if (!isPreviewOpen) {
+      setPreviewCardName(cardLabel);
+      setShowRelatedCards(false);
+    }
+  }, [cardLabel, isPreviewOpen]);
+
+  const openPreview = () => {
+    if (!isPreviewEnabled) return;
+    setPreviewCardName(cardLabel);
+    setIsPreviewOpen(true);
+  };
+
+  const handleCardKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!isPreviewEnabled) return;
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    setIsPreviewOpen(true);
+  };
 
   const cardContent = (
     <>
@@ -189,15 +286,35 @@ export function CardDisplay({
           <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
         </div>
       ) : data ? (
-        <img
-          src={data.imageUrl}
-          alt={data.name}
-          className="w-full h-full object-contain"
-          loading="lazy"
-        />
+        <div className="relative h-full w-full overflow-hidden">
+          <AnimatePresence mode="popLayout" initial={false}>
+            <motion.img
+              key={activeCardName}
+              src={data.imageUrl}
+              alt={data.name}
+              className="absolute inset-0 h-full w-full object-contain"
+              loading="lazy"
+              initial={{ opacity: 0, scale: 0.985 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 1.015 }}
+              transition={{ duration: 0.42, ease: 'easeInOut' }}
+            />
+          </AnimatePresence>
+          {slotCardNames.length > 1 && (
+            <motion.div
+              key={`glare-${activeCardName}`}
+              aria-hidden="true"
+              data-card-slot-glare
+              className="pointer-events-none absolute inset-y-[-35%] w-[48%] -skew-x-12 bg-gradient-to-r from-transparent via-white/55 to-transparent mix-blend-screen blur-sm"
+              initial={{ left: '-65%', opacity: 0 }}
+              animate={{ left: '125%', opacity: [0, 0.8, 0] }}
+              transition={{ duration: 0.72, ease: 'easeInOut' }}
+            />
+          )}
+        </div>
       ) : (
         <div className="w-full h-full flex items-center justify-center p-2 text-center text-xs text-muted-foreground">
-          {name}
+          {activeCardName}
         </div>
       )}
     </>
@@ -217,12 +334,26 @@ export function CardDisplay({
       <span>{zoneMeta.label}</span>
     </div>
   ) : null;
+  const originZoneBadge = showZoneBadge && originZoneMeta ? (
+    <SourceZoneBadge zone={originZone} />
+  ) : null;
+  const customTagBadge = customTag ? (
+    <div className="max-w-full rounded-full border border-cyan-300/45 bg-gradient-to-r from-cyan-300/20 to-fuchsia-300/20 px-2.5 py-1 text-[10px] font-display font-semibold uppercase tracking-wide text-cyan-100 shadow-[0_0_18px_rgba(103,232,249,0.16)] backdrop-blur-sm">
+      <span className="bg-gradient-to-r from-cyan-100 to-fuchsia-100 bg-clip-text text-transparent">
+        {customTag}
+      </span>
+    </div>
+  ) : null;
 
   if (compact) {
     return (
-      <div className="relative h-[204px] w-[140px] overflow-visible">
-        {statuses.length > 0 && (
-          <div className="pointer-events-none absolute inset-x-0 top-2 z-10 flex justify-center px-2">
+      <div
+        className="relative overflow-visible"
+        style={{ width: `${dimensions.width}px`, height: `${dimensions.height}px` }}
+      >
+        {(customTagBadge || statuses.length > 0) && (
+          <div className="pointer-events-none absolute inset-x-0 top-2 z-10 flex flex-col items-center justify-center gap-1 px-2">
+            {customTagBadge}
             <div className="flex flex-wrap items-center justify-center gap-1">
               {statuses.map((status, index) => {
                 return (
@@ -244,71 +375,182 @@ export function CardDisplay({
             {centerOverlay}
           </div>
         )}
-        {zoneBadge && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-2 z-10 flex justify-center px-2">
+        {(zoneBadge || originZoneBadge) && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-2 z-10 flex flex-col items-center justify-center gap-1 px-2">
             {zoneBadge}
+            {originZoneBadge}
           </div>
-        )}
-        <div className="h-full w-full">
+      )}
+      <div className="h-full w-full">
           {cardContent}
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="flex w-[140px] flex-col items-center shrink-0">
-      <div className="flex min-h-8 w-full items-center justify-center gap-2">
-        {statuses.map((status, index) => {
-          return (
-            <CardStatusBadge key={`${status}-${index}`} status={status} />
-          );
-        })}
-      </div>
-      <div className="relative flex w-full items-center justify-center">
-        <div className="absolute right-full mr-2 flex min-h-[204px] w-10 flex-col items-center justify-center gap-2">
-          {leftEffectTypes.map((effectType, index) => {
-            const { text, bg, border } = EFFECT_STYLES[effectType];
-            return (
-              <div
-                key={`${effectType}-${index}`}
-                className={`flex h-9 w-9 items-center justify-center rounded-full border ${bg} ${border}`}
-              >
-                <EffectGlyph type={effectType} className={`h-5 w-5 ${text}`} />
-              </div>
-            );
-          })}
+  const cardArtwork = (
+    <div
+      className={cn(
+        'relative transition-transform duration-200',
+        isPreviewEnabled && 'cursor-zoom-in hover:scale-[1.02] focus-visible:scale-[1.02]',
+      )}
+      onDoubleClick={openPreview}
+      onKeyDown={handleCardKeyDown}
+      role={isPreviewEnabled ? 'button' : undefined}
+      tabIndex={isPreviewEnabled ? 0 : undefined}
+      aria-label={isPreviewEnabled ? `Open full screen view for ${cardLabel} with a double click` : undefined}
+    >
+      {topLeftOverlay && (
+        <div className="pointer-events-none absolute left-2 top-2 z-10">
+          {topLeftOverlay}
         </div>
-        <div className="relative">
-          {topLeftOverlay && (
-            <div className="pointer-events-none absolute left-2 top-2 z-10">
-              {topLeftOverlay}
-            </div>
-          )}
-          {centerOverlay && (
-            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
-              {centerOverlay}
-            </div>
-          )}
-          {isActivated && (
-            <div className="activate-cursor" aria-hidden="true">
-              <div className={`flex h-8 w-8 items-center justify-center rounded-full border bg-secondary/90 ${EFFECT_STYLES.activate.border}`}>
-                <EffectGlyph type="activate" className="h-4 w-4" />
-              </div>
-            </div>
-          )}
-          <div className="w-[140px] h-[204px] card-shadow border border-border/50 bg-secondary">
-            {cardContent}
+      )}
+      {centerOverlay && (
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+          {centerOverlay}
+        </div>
+      )}
+      {isActivated && (
+        <div className="activate-cursor" aria-hidden="true">
+          <div className={`flex h-8 w-8 items-center justify-center rounded-full border bg-secondary/90 ${EFFECT_STYLES.activate.border}`}>
+            <EffectGlyph type="activate" className="h-4 w-4" />
           </div>
         </div>
+      )}
+      <div
+        className="card-shadow border border-border/50 bg-secondary"
+        style={{ width: `${dimensions.width}px`, height: `${dimensions.height}px` }}
+      >
+        {cardContent}
       </div>
-      <div className="mt-2 flex min-h-8 w-full items-center justify-center">
-        {zoneBadge}
-      </div>
-      <span className="mt-2 w-full text-center text-xs font-body leading-tight text-muted-foreground whitespace-normal break-words">
-        {data?.name || name}
-      </span>
     </div>
+  );
+
+  return (
+    <>
+      <div className="flex shrink-0 flex-col items-center" style={{ width: `${dimensions.width}px` }}>
+        <div
+          className="flex h-16 w-full shrink-0 flex-col items-center justify-end gap-1"
+          data-card-top-badge-rail
+        >
+          {customTagBadge}
+          <div className="flex flex-wrap items-center justify-center gap-2">
+          {statuses.map((status, index) => {
+            return (
+              <CardStatusBadge key={`${status}-${index}`} status={status} />
+            );
+          })}
+          </div>
+        </div>
+        <div className="relative flex w-full items-center justify-center">
+          <div
+            className="absolute right-full mr-2 flex flex-col items-center justify-center gap-2"
+            style={{ minHeight: `${dimensions.leftRailMinHeight}px`, width: `${dimensions.leftRailWidth}px` }}
+          >
+            {leftEffectTypes.map((effectType, index) => {
+              const { text, bg, border } = EFFECT_STYLES[effectType];
+              return (
+                <div
+                  key={`${effectType}-${index}`}
+                  className={`flex h-9 w-9 items-center justify-center rounded-full border ${bg} ${border}`}
+                >
+                  <EffectGlyph type={effectType} className={`h-5 w-5 ${text}`} />
+                </div>
+              );
+            })}
+          </div>
+          {cardArtwork}
+        </div>
+        <div className="mt-2 flex min-h-8 w-full flex-col items-center justify-center gap-1">
+          {zoneBadge}
+          {originZoneBadge}
+        </div>
+        <span className="mt-2 w-full text-center text-xs font-body leading-tight text-muted-foreground whitespace-normal break-words">
+          {cardLabel}
+        </span>
+      </div>
+      <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
+        <DialogContent className="left-0 top-0 h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 overflow-hidden border-0 bg-black/95 p-3 sm:rounded-none sm:p-6">
+          <DialogTitle className="sr-only">{previewCardLabel}</DialogTitle>
+          <DialogDescription className="sr-only">
+            Full screen preview for {previewCardLabel}
+          </DialogDescription>
+          <div className="flex h-full w-full items-stretch justify-center gap-4 overflow-hidden">
+            <div className="relative flex min-w-0 flex-1 items-center justify-center">
+              <button
+                type="button"
+                onClick={() => setShowRelatedCards((current) => !current)}
+                className="absolute right-3 top-3 z-20 flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/10 text-white shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur-md transition-all hover:border-white/30 hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 sm:right-5 sm:top-5"
+                aria-label={showRelatedCards ? 'Hide related cards' : 'Show related cards'}
+                title={showRelatedCards ? 'Hide related cards' : 'Show related cards'}
+              >
+                <Plus className={cn('h-5 w-5 transition-transform duration-200', showRelatedCards && 'rotate-45')} strokeWidth={2.3} />
+              </button>
+              {isPreviewLoading ? (
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full border border-white/15 bg-white/5">
+                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/70 border-t-transparent" />
+                  </div>
+                ) : previewData ? (
+                  <img
+                    src={previewData.imageUrl}
+                    alt={previewData.name}
+                    className="h-auto max-h-[calc(100dvh-2rem)] w-auto max-w-full rounded-2xl object-contain shadow-[0_24px_80px_rgba(0,0,0,0.55)] sm:max-h-[calc(100dvh-3rem)]"
+                  />
+                ) : (
+                  <div className="flex h-[min(calc(100dvh-2rem),720px)] w-[min(86vw,520px)] items-center justify-center rounded-[28px] border border-white/15 bg-white/5 p-8 text-center text-xl text-white/80 shadow-[0_24px_80px_rgba(0,0,0,0.55)] sm:h-[min(calc(100dvh-3rem),720px)]">
+                    {previewCardLabel}
+                  </div>
+                )}
+            </div>
+            {showRelatedCards && (
+              <aside className="flex h-full w-[min(34vw,360px)] min-w-[260px] flex-col rounded-2xl border border-white/10 bg-white/[0.06] p-3 text-white shadow-[0_24px_80px_rgba(0,0,0,0.35)] backdrop-blur-md max-md:absolute max-md:inset-x-3 max-md:bottom-3 max-md:h-[42dvh] max-md:w-auto max-md:min-w-0">
+                <div className="shrink-0 border-b border-white/10 pb-3">
+                  <p className="text-xs font-display font-semibold uppercase tracking-wide text-white/45">Related cards</p>
+                  <p className="mt-1 line-clamp-2 text-sm font-display font-semibold text-white/90">
+                    {relatedCardsData?.archetype || previewCardLabel}
+                  </p>
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto py-3">
+                  {areRelatedCardsLoading ? (
+                    <div className="flex h-full items-center justify-center">
+                      <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/70 border-t-transparent" />
+                    </div>
+                  ) : relatedCardsData?.cards.length ? (
+                    <div className="space-y-3">
+                      {relatedCardsData.cards.map((card) => (
+                        <button
+                          type="button"
+                          key={card.id}
+                          onClick={() => setPreviewCardName(card.name)}
+                          className={cn(
+                            'group rounded-lg border bg-black/20 p-1.5 text-left transition-all hover:-translate-y-0.5 hover:border-white/30 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50',
+                            card.name === previewCardLabel ? 'border-white/45 bg-white/12' : 'border-white/10',
+                          )}
+                        >
+                          <img
+                            src={card.thumbnailUrl}
+                            alt={card.name}
+                            className="aspect-[0.686] w-full rounded-md object-cover"
+                            loading="lazy"
+                          />
+                          <span className="mt-1.5 block line-clamp-2 text-[11px] font-body leading-tight text-white/75 group-hover:text-white">
+                            {card.name}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-white/15 bg-black/10 p-5 text-center text-sm text-white/60">
+                      No related cards found for this card.
+                    </div>
+                  )}
+                </div>
+              </aside>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
