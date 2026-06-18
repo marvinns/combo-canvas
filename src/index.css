@@ -107,14 +107,24 @@
       linear-gradient(180deg, hsl(233 36% 11%), hsl(230 25% 8%));
   }
 
+  .shapegrid-canvas > .side-rays-container {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    opacity: 0.9;
+    mix-blend-mode: screen;
+  }
+
   .shapegrid-canvas::before,
   .shapegrid-canvas::after {
     content: "";
     position: absolute;
     inset: 0;
+    pointer-events: none;
   }
 
   .shapegrid-canvas::before {
+    z-index: 3;
     background-image:
       linear-gradient(hsl(0 0% 100% / 0.16) 1px, transparent 1px),
       linear-gradient(90deg, hsl(0 0% 100% / 0.16) 1px, transparent 1px),
@@ -129,6 +139,7 @@
   }
 
   .shapegrid-canvas::after {
+    z-index: 2;
     background:
       radial-gradient(circle at center, hsl(var(--accent) / 0.22) 0, transparent 18%),
       radial-gradient(circle at center, hsl(var(--primary) / 0.14) 0, transparent 32%);
