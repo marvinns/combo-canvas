@@ -7,9 +7,22 @@ export interface SavedCombo {
   stepComments?: ComboStepComments;
   comboLinks?: ComboStepLinks;
   thumbnailCardName?: string;
+  notes?: string;
   name: string;
   text: string;
   createdAt: number;
+}
+
+export interface ComboLibraryBackup {
+  version: 1;
+  exportedAt?: string;
+  combos: SavedCombo[];
+  subsections: Record<string, DeckSubsection[]>;
+}
+
+export interface ComboLibraryImportResult {
+  combos: SavedCombo[];
+  subsections: Record<string, DeckSubsection[]>;
 }
 
 export type ComboEndboardSlotCards = string | string[];
@@ -472,6 +485,7 @@ function normalizeSavedCombo(combo: Partial<SavedCombo>): SavedCombo | null {
   const stepComments = normalizeStepComments(combo.stepComments);
   const comboLinks = normalizeComboLinks(combo.comboLinks);
   const thumbnailCardName = typeof combo.thumbnailCardName === 'string' ? combo.thumbnailCardName.trim() : '';
+  const notes = typeof combo.notes === 'string' ? combo.notes.trim() : '';
   const subsectionId = typeof combo.subsectionId === 'string' ? combo.subsectionId.trim() : '';
 
   return {
@@ -483,6 +497,7 @@ function normalizeSavedCombo(combo: Partial<SavedCombo>): SavedCombo | null {
     stepComments,
     comboLinks,
     thumbnailCardName: thumbnailCardName || undefined,
+    notes: notes || undefined,
     name: combo.name,
     text: combo.text,
     createdAt: combo.createdAt,
@@ -587,36 +602,39 @@ export function getSavedCombos(): SavedCombo[] {
   }
 }
 
+function normalizeDeckSubsections(value: unknown): Record<string, DeckSubsection[]> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+
+  return Object.entries(value).reduce<Record<string, DeckSubsection[]>>((result, [deckName, subsections]) => {
+    if (!deckName.trim() || !Array.isArray(subsections)) return result;
+
+    const normalized = subsections.flatMap((subsection) => {
+      if (!subsection || typeof subsection !== 'object') return [];
+      const maybeSubsection = subsection as Partial<DeckSubsection>;
+      const id = typeof maybeSubsection.id === 'string' ? maybeSubsection.id.trim() : '';
+      const name = typeof maybeSubsection.name === 'string' ? maybeSubsection.name.trim() : '';
+      const parentId = typeof maybeSubsection.parentId === 'string' ? maybeSubsection.parentId.trim() : '';
+      return id && name ? [{ id, name, ...(parentId ? { parentId } : {}) }] : [];
+    });
+
+    const subsectionIds = new Set(normalized.map((subsection) => subsection.id));
+    const normalizedWithValidParents = normalized.map((subsection) =>
+      subsection.parentId && subsectionIds.has(subsection.parentId) && subsection.parentId !== subsection.id
+        ? subsection
+        : { id: subsection.id, name: subsection.name },
+    );
+
+    if (normalizedWithValidParents.length > 0) result[deckName] = normalizedWithValidParents;
+    return result;
+  }, {});
+}
+
 function getSavedDeckSubsections(): Record<string, DeckSubsection[]> {
   try {
     const raw = localStorage.getItem(SUBSECTIONS_STORAGE_KEY);
     if (!raw) return {};
 
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-
-    return Object.entries(parsed).reduce<Record<string, DeckSubsection[]>>((result, [deckName, subsections]) => {
-      if (!deckName.trim() || !Array.isArray(subsections)) return result;
-
-      const normalized = subsections.flatMap((subsection) => {
-        if (!subsection || typeof subsection !== 'object') return [];
-        const maybeSubsection = subsection as Partial<DeckSubsection>;
-        const id = typeof maybeSubsection.id === 'string' ? maybeSubsection.id.trim() : '';
-        const name = typeof maybeSubsection.name === 'string' ? maybeSubsection.name.trim() : '';
-        const parentId = typeof maybeSubsection.parentId === 'string' ? maybeSubsection.parentId.trim() : '';
-        return id && name ? [{ id, name, ...(parentId ? { parentId } : {}) }] : [];
-      });
-
-      const subsectionIds = new Set(normalized.map((subsection) => subsection.id));
-      const normalizedWithValidParents = normalized.map((subsection) =>
-        subsection.parentId && subsectionIds.has(subsection.parentId) && subsection.parentId !== subsection.id
-          ? subsection
-          : { id: subsection.id, name: subsection.name },
-      );
-
-      if (normalizedWithValidParents.length > 0) result[deckName] = normalizedWithValidParents;
-      return result;
-    }, {});
+    return normalizeDeckSubsections(JSON.parse(raw));
   } catch {
     return {};
   }
@@ -624,6 +642,47 @@ function getSavedDeckSubsections(): Record<string, DeckSubsection[]> {
 
 function saveDeckSubsections(subsections: Record<string, DeckSubsection[]>): void {
   localStorage.setItem(SUBSECTIONS_STORAGE_KEY, JSON.stringify(subsections));
+}
+
+export function getComboLibraryBackup(): ComboLibraryBackup {
+  return {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    combos: getSavedCombos(),
+    subsections: getSavedDeckSubsections(),
+  };
+}
+
+export function normalizeComboLibraryBackup(value: unknown): ComboLibraryBackup {
+  const source = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Partial<ComboLibraryBackup> & { data?: unknown }
+    : {};
+  const rawCombos = Array.isArray(source.combos)
+    ? source.combos
+    : Array.isArray(value)
+      ? value
+      : [];
+  const combos = rawCombos
+    .map((combo) => normalizeSavedCombo(combo as Partial<SavedCombo>))
+    .filter((combo): combo is SavedCombo => Boolean(combo));
+  const subsections = normalizeDeckSubsections(source.subsections);
+
+  return {
+    version: 1,
+    exportedAt: typeof source.exportedAt === 'string' ? source.exportedAt : undefined,
+    combos,
+    subsections,
+  };
+}
+
+export function importComboLibraryBackup(value: unknown): ComboLibraryImportResult {
+  const backup = normalizeComboLibraryBackup(value);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(backup.combos));
+  saveDeckSubsections(backup.subsections);
+  return {
+    combos: backup.combos,
+    subsections: backup.subsections,
+  };
 }
 
 export function getDeckSubsections(deckName: string): DeckSubsection[] {
@@ -733,7 +792,7 @@ export function saveCombo(
   return combo;
 }
 
-export function updateCombo(id: string, updates: Partial<Pick<SavedCombo, 'deck' | 'name' | 'text' | 'endboardSlots' | 'stepComments' | 'comboLinks' | 'thumbnailCardName'>> & { assignedDeck?: DeckAssignment | null; subsectionId?: string | null }): SavedCombo | null {
+export function updateCombo(id: string, updates: Partial<Pick<SavedCombo, 'deck' | 'name' | 'text' | 'endboardSlots' | 'stepComments' | 'comboLinks' | 'thumbnailCardName' | 'notes'>> & { assignedDeck?: DeckAssignment | null; subsectionId?: string | null }): SavedCombo | null {
   const combos = getSavedCombos();
   const comboIndex = combos.findIndex((combo) => combo.id === id);
   if (comboIndex === -1) return null;
@@ -744,6 +803,7 @@ export function updateCombo(id: string, updates: Partial<Pick<SavedCombo, 'deck'
   const stepComments = updates.stepComments !== undefined ? normalizeStepComments(updates.stepComments) : existingCombo.stepComments;
   const comboLinks = updates.comboLinks !== undefined ? normalizeComboLinks(updates.comboLinks) : existingCombo.comboLinks;
   const thumbnailCardName = updates.thumbnailCardName !== undefined ? updates.thumbnailCardName.trim() || undefined : existingCombo.thumbnailCardName;
+  const notes = updates.notes !== undefined ? updates.notes.trim() || undefined : existingCombo.notes;
   const subsectionId = updates.subsectionId !== undefined ? updates.subsectionId?.trim() || undefined : existingCombo.subsectionId;
   const updatedCombo: SavedCombo = {
     ...existingCombo,
@@ -754,6 +814,7 @@ export function updateCombo(id: string, updates: Partial<Pick<SavedCombo, 'deck'
     stepComments,
     comboLinks,
     thumbnailCardName,
+    notes,
     name: updates.name !== undefined ? updates.name : existingCombo.name,
     text: updates.text !== undefined ? updates.text : existingCombo.text,
   };

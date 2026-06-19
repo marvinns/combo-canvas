@@ -1,6 +1,6 @@
 export type CardZone = 'hand' | 'gy' | 'deck' | 'extra-deck' | 'banished';
 export type ScaleSide = 'left' | 'right';
-export type ComboPhase = 'Draw Phase' | 'Main Phase 1' | 'Battle Phase' | 'Main Phase 2' | 'End Phase';
+export type ComboPhase = 'Draw Phase' | 'Standby Phase' | 'Main Phase 1' | 'Battle Phase' | 'Main Phase 2' | 'End Phase';
 
 export interface ComboStepPath {
   label: string;
@@ -115,6 +115,7 @@ function inferDefaultSourceZone(label: string, sourceZone: CardZone | undefined)
 function detectPhase(text: string): ComboPhase | undefined {
   const phasePatterns: Array<{ phase: ComboPhase; pattern: RegExp }> = [
     { phase: 'Draw Phase', pattern: /\b(?:during\s+the\s+)?(?:draw\s+phase|dp)\b/i },
+    { phase: 'Standby Phase', pattern: /\b(?:during\s+the\s+)?(?:standby\s+phase|sb)\b/i },
     { phase: 'Main Phase 1', pattern: /\b(?:during\s+the\s+)?(?:main\s+phase\s+1|mp1)\b/i },
     { phase: 'Battle Phase', pattern: /\b(?:during\s+the\s+)?(?:battle\s+phase|bp)\b/i },
     { phase: 'Main Phase 2', pattern: /\b(?:during\s+the\s+)?(?:main\s+phase\s+2|mp2)\b/i },
@@ -126,7 +127,7 @@ function detectPhase(text: string): ComboPhase | undefined {
 
 function stripLeadingPhaseForParsing(text: string): string {
   return text.replace(
-    /^(?:(?:during\s+the\s+)?(?:draw\s+phase|main\s+phase\s+1|battle\s+phase|main\s+phase\s+2|end\s+phase|dp|mp1|bp|mp2|ep))\s*,?\s*/i,
+    /^(?:(?:during\s+the\s+)?(?:draw\s+phase|standby\s+phase|main\s+phase\s+1|battle\s+phase|main\s+phase\s+2|end\s+phase|dp|sb|mp1|bp|mp2|ep))\s*,?\s*/i,
     '',
   );
 }
