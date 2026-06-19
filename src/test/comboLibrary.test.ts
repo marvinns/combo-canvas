@@ -4,12 +4,15 @@ import {
   createDeckSubsection,
   createDeckAssignment,
   deleteDeckSubsection,
+  getComboLibraryBackup,
   type ComboDeckDraftLookupCard,
   getComboDeckDraftText,
   getDeckBlockingErrors,
   getDeckSubsections,
   getSavedCombos,
+  importComboLibraryBackup,
   maintainExtraDeckFilter,
+  normalizeComboLibraryBackup,
   parseDeckSection,
   renameDeck,
   renameDeckSubsection,
@@ -84,6 +87,46 @@ describe('deck assignment helpers', () => {
 
     expect(updatedCombo?.endboardSlots?.['spell-2']).toEqual(['Branded Retribution', 'Branded in Red']);
     expect(getSavedCombos()[0].endboardSlots?.['spell-2']).toEqual(['Branded Retribution', 'Branded in Red']);
+  });
+
+  it('exports and imports combo library backups with endboards, notes, and subsections', () => {
+    const combo = saveCombo('Branded', 'Backup Combo', 'Activate [Branded Fusion]', undefined, {
+      'spell-1': ['Branded in Red', 'Branded Retribution'],
+    });
+    const subsection = createDeckSubsection('Branded', '1-card combos')!;
+    updateCombo(combo.id, {
+      notes: 'Remember the mirror line.',
+      subsectionId: subsection.id,
+    });
+
+    const backup = getComboLibraryBackup();
+    localStorage.clear();
+
+    const imported = importComboLibraryBackup(backup);
+
+    expect(imported.combos).toHaveLength(1);
+    expect(getSavedCombos()[0].notes).toBe('Remember the mirror line.');
+    expect(getSavedCombos()[0].endboardSlots?.['spell-1']).toEqual(['Branded in Red', 'Branded Retribution']);
+    expect(getDeckSubsections('Branded')).toEqual([subsection]);
+  });
+
+  it('normalizes committed seed-style backup data', () => {
+    const backup = normalizeComboLibraryBackup({
+      combos: [{
+        id: 'seed-combo',
+        deck: 'Branded',
+        name: 'Seed Combo',
+        text: 'Activate [Seed Card]',
+        notes: 'Seed note',
+        createdAt: 1,
+      }],
+      subsections: {
+        Branded: [{ id: 'seed-section', name: 'Seed Section' }],
+      },
+    });
+
+    expect(backup.combos[0].notes).toBe('Seed note');
+    expect(backup.subsections.Branded).toEqual([{ id: 'seed-section', name: 'Seed Section' }]);
   });
 
   it('keeps custom subsections scoped to their deck and migrates them when the deck is renamed', () => {

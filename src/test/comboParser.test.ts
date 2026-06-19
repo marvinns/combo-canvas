@@ -1706,6 +1706,19 @@ describe('parseCombo phase syntax', () => {
     expect(action.phase).toBe('Draw Phase');
   });
 
+  it.each([
+    ['Standby Phase activate [Card A].'],
+    ['During the Standby Phase, activate [Card A].'],
+    ['SB activate [Card A].'],
+    ['sb activate [Card A].'],
+  ])('parses standby phase wording as phase metadata: %s', (line) => {
+    const [action] = parseCombo(line);
+
+    expect(action.phase).toBe('Standby Phase');
+    expect(action.type).toBe('activate');
+    expect(action.sourceCard).toBe('Card A');
+  });
+
   it('parses BP shorthand as battle phase metadata', () => {
     const [action] = parseCombo('BP activate [Card A].');
 

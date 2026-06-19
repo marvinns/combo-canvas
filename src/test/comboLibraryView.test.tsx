@@ -91,6 +91,36 @@ describe('ComboLibrary view toggle', () => {
     await waitFor(() => expect(JSON.parse(localStorage.getItem('ygo-combo-library')!)).toHaveLength(1));
   });
 
+  it('opens and saves combo notes from the info button in card and compact views', async () => {
+    localStorage.setItem('ygo-combo-library', JSON.stringify([{
+      id: 'combo-notes',
+      deck: 'Branded',
+      name: 'Notes Combo',
+      text: 'Activate [Example Card]',
+      createdAt: 1,
+    }]));
+
+    render(<ComboLibrary currentText="" onLoad={vi.fn()} />);
+
+    fireEvent.click(screen.getByLabelText('Open notes for Notes Combo'));
+    expect(screen.getByText('Notes for Notes Combo')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Combo notes'), {
+      target: { value: 'Remember the anti-Nibiru line.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Notes' }));
+
+    await waitFor(() => {
+      expect(JSON.parse(localStorage.getItem('ygo-combo-library')!)[0].notes).toBe('Remember the anti-Nibiru line.');
+      expect(screen.getByText('Remember the anti-Nibiru line.')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Show compact list view'));
+    fireEvent.click(screen.getByRole('button', { name: 'Branded' }));
+    fireEvent.click(screen.getByLabelText('Open notes for Notes Combo'));
+
+    expect(screen.getByLabelText('Combo notes')).toHaveValue('Remember the anti-Nibiru line.');
+  });
+
   it('navigates All Decks as deck, subsection, then combo hierarchy', () => {
     localStorage.setItem('ygo-combo-library', JSON.stringify([
       {

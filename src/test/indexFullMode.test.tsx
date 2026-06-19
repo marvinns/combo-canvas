@@ -12,6 +12,17 @@ vi.mock('@/components/SideRays', () => ({
   SideRays: () => null,
 }));
 
+function setEditorTextAndCaret(editor: HTMLDivElement, text: string, caretOffset = text.length) {
+  editor.textContent = text;
+  const textNode = editor.firstChild ?? editor.appendChild(document.createTextNode(''));
+  const range = document.createRange();
+  range.setStart(textNode, caretOffset);
+  range.setEnd(textNode, caretOffset);
+  window.getSelection()?.removeAllRanges();
+  window.getSelection()?.addRange(range);
+  fireEvent.input(editor);
+}
+
 describe('Index full mode desktop breakdown', () => {
   it('preserves the selected combo-library deck after hide and show', () => {
     localStorage.clear();
@@ -191,5 +202,84 @@ describe('Index full mode desktop breakdown', () => {
       expect(editor.textContent).not.toContain('Diazzzz');
     });
     expect(editor.textContent).toContain('Special Summon [Diabellze the White Witch]');
+  }, 15000);
+
+  it('shows subtle inline combo autocomplete and accepts it with the right arrow', async () => {
+    const { container } = render(<Index />);
+    const editor = container.querySelector('[contenteditable="true"]') as HTMLDivElement;
+
+    setEditorTextAndCaret(editor, 'Sy');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('inline-combo-autocomplete')).toHaveTextContent(
+        'Synchro Summon [card] using [card] and [card]',
+      );
+    });
+
+    fireEvent.keyDown(editor, { key: 'ArrowRight' });
+
+    await waitFor(() => {
+      expect(editor.textContent).toBe('Synchro Summon [card] using [card] and [card]');
+    });
+  }, 15000);
+
+  it('continues route substep numbering when pressing enter at the end of a route line', async () => {
+    const { container } = render(<Index />);
+    const editor = container.querySelector('[contenteditable="true"]') as HTMLDivElement;
+
+    setEditorTextAndCaret(editor, '10.1a Activate [Fallen of Albaz]');
+    fireEvent.keyDown(editor, { key: 'Enter' });
+
+    expect(editor.innerHTML.replace(/&nbsp;/g, ' ')).toContain('10.1a Activate [Fallen of Albaz]<br>10.1b');
+  }, 15000);
+
+  it('prioritizes inline autocomplete phrases from the active combo deck', async () => {
+    localStorage.clear();
+    localStorage.setItem('ygo-combo-library', JSON.stringify([
+      {
+        id: 'anchor-combo',
+        deck: 'Branded',
+        name: 'Anchor Combo',
+        text: 'Normal Summon [Aluber]',
+        createdAt: 1,
+      },
+      {
+        id: 'same-deck-fusion',
+        deck: 'Branded',
+        name: 'Cartesia Fusion Line',
+        text: 'Activate [Blazing Cartesia, the Virtuous] to Fusion Summon [Albion the Branded Dragon]',
+        createdAt: 2,
+      },
+      {
+        id: 'other-deck-fusion',
+        deck: 'Heroes',
+        name: 'Other Activate Line',
+        text: 'Activate [Blazing Cartesia, the Virtuous] to add [Elemental HERO Neos]',
+        createdAt: 3,
+      },
+    ]));
+
+    const { container } = render(<Index />);
+    fireEvent.click(screen.getByRole('button', { name: /Combo Library/ }));
+    fireEvent.click(screen.getByText('Anchor Combo'));
+
+    const editor = container.querySelector('[contenteditable="true"]') as HTMLDivElement;
+    setEditorTextAndCaret(editor, 'Activate [Blazing Cartesia, the Virtuous] to ');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('inline-combo-autocomplete')).toHaveTextContent(
+        'Activate [Blazing Cartesia, the Virtuous] to Fusion Summon [Albion the Branded Dragon]',
+      );
+    });
+
+    setEditorTextAndCaret(editor, 'Activate [Blazing Cartesia, the Virtuous] to F');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('inline-combo-autocomplete')).toHaveTextContent(
+        'Activate [Blazing Cartesia, the Virtuous] to Fusion Summon [Albion the Branded Dragon]',
+      );
+    });
+
+    localStorage.clear();
   }, 15000);
 });

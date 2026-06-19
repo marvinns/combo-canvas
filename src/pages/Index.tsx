@@ -42,6 +42,24 @@ const PRESETS = [
   'Tribute [Card]',
 ];
 
+const COMMON_COMBO_AUTOCOMPLETE_PHRASES = [
+  'Normal Summon [card]',
+  'Special Summon [card]',
+  'Synchro Summon [card] using [card] and [card]',
+  'Fusion Summon [card] using [card] and [card]',
+  'Xyz Summon [card] using [card] and [card]',
+  'Link Summon [card] using [card]',
+  'Activate [card]',
+  'Activate [card] targeting [card]',
+  'Search [card] from deck',
+  'Add [card] to hand',
+  'Banish [card]',
+  'Send [card] to the GY',
+  'Set [card]',
+  'Discard [card]',
+  'Tribute [card]',
+];
+
 const SHORTCUT_GROUPS = [
   {
     title: 'Editor',
@@ -52,6 +70,7 @@ const SHORTCUT_GROUPS = [
       { keys: ['Alt', '['], description: 'Wrap selected text as a card' },
       { keys: ['Cmd/Ctrl', 'B'], description: 'Bold selected text' },
       { keys: ['Enter'], description: 'Insert a new line' },
+      { keys: ['Right'], description: 'Accept inline autocomplete' },
     ],
   },
   {
@@ -181,6 +200,11 @@ type CardSuggestion = {
   source: 'assigned-deck' | 'combo';
   deckCount?: number;
   deckSection?: DeckSection;
+};
+
+type InlineComboAutocomplete = {
+  completion: string;
+  caretRawOffset: number;
 };
 
 type ComboLineRange = {
@@ -480,6 +504,43 @@ function getCardSuggestionRange(text: string, rawSelectionStart: number, rawSele
   };
 }
 
+function incrementRouteSubstep(substep: string): string {
+  const lowerSubstep = substep.toLowerCase();
+  let carry = true;
+  const nextLetters = lowerSubstep.split('');
+
+  for (let index = nextLetters.length - 1; index >= 0; index -= 1) {
+    if (nextLetters[index] === 'z') {
+      nextLetters[index] = 'a';
+      continue;
+    }
+
+    nextLetters[index] = String.fromCharCode(nextLetters[index].charCodeAt(0) + 1);
+    carry = false;
+    break;
+  }
+
+  return carry ? `a${nextLetters.join('')}` : nextLetters.join('');
+}
+
+function getNextRouteLineInsertion(text: string, rawSelectionStart: number, rawSelectionEnd: number): string | null {
+  if (rawSelectionStart !== rawSelectionEnd) return null;
+
+  const lineStart = text.lastIndexOf('\n', Math.max(0, rawSelectionStart - 1)) + 1;
+  const lineEndIndex = text.indexOf('\n', rawSelectionStart);
+  const lineEnd = lineEndIndex === -1 ? text.length : lineEndIndex;
+  const currentLine = text.slice(lineStart, lineEnd);
+  const caretColumn = rawSelectionStart - lineStart;
+  const textAfterCaret = currentLine.slice(caretColumn);
+  if (textAfterCaret.trim().length > 0) return null;
+
+  const routeMatch = currentLine.match(/^(\s*)(\d+\.\d+)([a-z]+)(?:[\s.,:)-]|$)/i);
+  if (!routeMatch) return null;
+
+  const [, indentation, routePrefix, substep] = routeMatch;
+  return `\n${indentation}${routePrefix}${incrementRouteSubstep(substep)} `;
+}
+
 function setEditorSelectionByOffsets(container: HTMLElement, start: number, end: number) {
   const selection = window.getSelection();
   if (!selection) return;
@@ -645,6 +706,63 @@ function getCardSuggestions(text: string, assignedDeck?: DeckAssignment): CardSu
       b.lastIndex - a.lastIndex ||
       a.name.localeCompare(b.name)
     ));
+}
+
+function getSavedComboDeckName(combo: SavedCombo): string {
+  return combo.assignedDeck?.name || combo.deck || 'Unassigned';
+}
+
+function getCurrentEditorLinePrefix(text: string, rawCaretOffset: number): string {
+  const lineStart = text.lastIndexOf('\n', Math.max(0, rawCaretOffset - 1)) + 1;
+  return text.slice(lineStart, rawCaretOffset);
+}
+
+function isCaretInsideCardToken(text: string, rawCaretOffset: number): boolean {
+  const lineStart = text.lastIndexOf('\n', Math.max(0, rawCaretOffset - 1)) + 1;
+  const linePrefix = text.slice(lineStart, rawCaretOffset);
+  return linePrefix.lastIndexOf('[') > linePrefix.lastIndexOf(']');
+}
+
+function getInlineComboAutocomplete(
+  text: string,
+  rawCaretOffset: number | null,
+  deckName?: string,
+): InlineComboAutocomplete | null {
+  if (rawCaretOffset === null || rawCaretOffset < 0) return null;
+  if (isCaretInsideCardToken(text, rawCaretOffset)) return null;
+
+  const linePrefix = getCurrentEditorLinePrefix(text, rawCaretOffset);
+  const trimmedPrefix = linePrefix.trimStart();
+  if (trimmedPrefix.trim().length < 2) return null;
+
+  const afterCaret = text.slice(rawCaretOffset);
+  const nextLineBreak = afterCaret.indexOf('\n');
+  const textUntilLineEnd = nextLineBreak === -1 ? afterCaret : afterCaret.slice(0, nextLineBreak);
+  if (textUntilLineEnd.trim().length > 0) return null;
+
+  const normalizedPrefix = trimmedPrefix.toLowerCase();
+  const seen = new Set<string>();
+  const savedCandidates = deckName
+    ? getSavedCombos()
+        .filter((combo) => getSavedComboDeckName(combo) === deckName)
+        .flatMap((combo) => combo.text.split('\n'))
+        .map((line) => line.trim())
+    : [];
+  const candidates = [...savedCandidates, ...COMMON_COMBO_AUTOCOMPLETE_PHRASES]
+    .filter((candidate) => {
+      const key = candidate.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return key.startsWith(normalizedPrefix) && candidate.length > trimmedPrefix.length;
+    });
+
+  const suggestion = candidates[0];
+  if (!suggestion) return null;
+
+  return {
+    completion: suggestion.slice(trimmedPrefix.length),
+    caretRawOffset: rawCaretOffset,
+  };
 }
 
 async function searchYgoCards(query: string): Promise<YgoSearchCard[]> {
@@ -1471,6 +1589,7 @@ export default function Index() {
   const [activeCardSuggestions, setActiveCardSuggestions] = useState<CardSuggestion[]>([]);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0);
   const [activeSuggestionRange, setActiveSuggestionRange] = useState<{ start: number; end: number } | null>(null);
+  const [editorRawCaretOffset, setEditorRawCaretOffset] = useState<number | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
   const previousHighlightedStepRef = useRef<number | null>(null);
   const pendingEditorHighlightRef = useRef(false);
@@ -1502,6 +1621,11 @@ export default function Index() {
     selectedEndboardRoute !== undefined ? endboardBranchGroup?.baseStep : undefined,
     selectedEndboardRoute,
   );
+  const activeComboDeckName = activeAssignedDeck?.name || lastSavedCombo?.assignedDeck?.name || lastSavedCombo?.deck;
+  const inlineAutocomplete = useMemo(() => {
+    if (activeCardSuggestions.length > 0) return null;
+    return getInlineComboAutocomplete(comboText, editorRawCaretOffset, activeComboDeckName);
+  }, [activeCardSuggestions.length, activeComboDeckName, comboText, editorRawCaretOffset]);
 
   useEffect(() => {
     comboTextRef.current = comboText;
@@ -1766,6 +1890,22 @@ export default function Index() {
     setActiveSuggestionRange(null);
   };
 
+  const refreshEditorCaretOffset = useCallback((text: string) => {
+    const editor = editorRef.current;
+    if (!editor) {
+      setEditorRawCaretOffset(null);
+      return;
+    }
+
+    const selectionOffsets = getEditorSelectionOffsets(editor);
+    if (!selectionOffsets || selectionOffsets.start !== selectionOffsets.end) {
+      setEditorRawCaretOffset(null);
+      return;
+    }
+
+    setEditorRawCaretOffset(renderedOffsetToRawOffset(text, selectionOffsets.start));
+  }, []);
+
   const refreshCardSuggestions = (text: string) => {
     const editor = editorRef.current;
     if (!editor) {
@@ -1815,6 +1955,7 @@ export default function Index() {
     const caretOffset = activeSuggestionRange.start + insertedText.length;
 
     setComboText(nextText);
+    setEditorRawCaretOffset(caretOffset);
     closeCardSuggestions();
     requestAnimationFrame(() => {
       const currentEditor = editorRef.current;
@@ -1823,6 +1964,60 @@ export default function Index() {
       const renderedCaretOffset = rawOffsetToRenderedOffset(nextText, caretOffset);
       setEditorSelectionByOffsets(currentEditor, renderedCaretOffset, renderedCaretOffset);
     });
+  };
+
+  const acceptInlineAutocomplete = () => {
+    const editor = editorRef.current;
+    if (!editor || !inlineAutocomplete) return;
+
+    const nextText =
+      comboText.slice(0, inlineAutocomplete.caretRawOffset) +
+      inlineAutocomplete.completion +
+      comboText.slice(inlineAutocomplete.caretRawOffset);
+    const caretOffset = inlineAutocomplete.caretRawOffset + inlineAutocomplete.completion.length;
+
+    setComboText(nextText);
+    setEditorRawCaretOffset(caretOffset);
+    closeCardSuggestions();
+    requestAnimationFrame(() => {
+      const currentEditor = editorRef.current;
+      if (!currentEditor) return;
+      currentEditor.focus();
+      const renderedCaretOffset = rawOffsetToRenderedOffset(nextText, caretOffset);
+      setEditorSelectionByOffsets(currentEditor, renderedCaretOffset, renderedCaretOffset);
+    });
+  };
+
+  const insertNextRouteLine = () => {
+    const editor = editorRef.current;
+    if (!editor) return false;
+
+    const selectionOffsets = getEditorSelectionOffsets(editor);
+    if (!selectionOffsets) return false;
+
+    const rawSelectionStart = renderedOffsetToRawOffset(comboText, selectionOffsets.start);
+    const rawSelectionEnd = renderedOffsetToRawOffset(comboText, selectionOffsets.end);
+    const insertion = getNextRouteLineInsertion(comboText, rawSelectionStart, rawSelectionEnd);
+    if (!insertion) return false;
+
+    const nextText =
+      comboText.slice(0, rawSelectionStart) +
+      insertion +
+      comboText.slice(rawSelectionEnd);
+    const caretOffset = rawSelectionStart + insertion.length;
+
+    setComboText(nextText);
+    setEditorRawCaretOffset(caretOffset);
+    closeCardSuggestions();
+    requestAnimationFrame(() => {
+      const currentEditor = editorRef.current;
+      if (!currentEditor) return;
+      currentEditor.focus();
+      const renderedCaretOffset = rawOffsetToRenderedOffset(nextText, caretOffset);
+      setEditorSelectionByOffsets(currentEditor, renderedCaretOffset, renderedCaretOffset);
+    });
+
+    return true;
   };
 
   useEffect(() => {
@@ -2528,6 +2723,7 @@ export default function Index() {
                 const nextText = editorHtmlToComboText(e.currentTarget);
                 setComboText(nextText);
                 refreshCardSuggestions(nextText);
+                refreshEditorCaretOffset(nextText);
               }}
               onScroll={(e) => setEditorScrollTop(e.currentTarget.scrollTop)}
               onKeyDown={(e) => {
@@ -2560,17 +2756,34 @@ export default function Index() {
                   }
                 }
 
+                if (
+                  inlineAutocomplete &&
+                  activeCardSuggestions.length === 0 &&
+                  e.key === 'ArrowRight' &&
+                  !e.altKey &&
+                  !e.ctrlKey &&
+                  !e.metaKey &&
+                  !e.shiftKey
+                ) {
+                  e.preventDefault();
+                  acceptInlineAutocomplete();
+                  return;
+                }
+
                 if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
                   e.preventDefault();
                   document.execCommand('bold');
                   const editor = editorRef.current;
                   if (editor) {
-                    setComboText(editorHtmlToComboText(editor));
+                    const nextText = editorHtmlToComboText(editor);
+                    setComboText(nextText);
+                    refreshEditorCaretOffset(nextText);
                   }
                 }
 
                 if (e.key === 'Enter') {
                   e.preventDefault();
+                  if (insertNextRouteLine()) return;
                   document.execCommand('insertLineBreak');
                 }
               }}
@@ -2582,10 +2795,17 @@ export default function Index() {
                   return;
                 }
 
-                refreshCardSuggestions(editorHtmlToComboText(e.currentTarget));
+                const nextText = editorHtmlToComboText(e.currentTarget);
+                refreshCardSuggestions(nextText);
+                refreshEditorCaretOffset(nextText);
               }}
-              onClick={(e) => refreshCardSuggestions(editorHtmlToComboText(e.currentTarget))}
+              onClick={(e) => {
+                const nextText = editorHtmlToComboText(e.currentTarget);
+                refreshCardSuggestions(nextText);
+                refreshEditorCaretOffset(nextText);
+              }}
               onBlur={() => {
+                setEditorRawCaretOffset(null);
                 requestAnimationFrame(() => {
                   const activeElement = document.activeElement as HTMLElement | null;
                   if (activeElement?.dataset.comboSuggestion === 'true') return;
@@ -2607,10 +2827,25 @@ export default function Index() {
                   const nextText = editorHtmlToComboText(editor);
                   setComboText(nextText);
                   refreshCardSuggestions(nextText);
+                  refreshEditorCaretOffset(nextText);
                 }
               }}
               className="h-36 overflow-y-auto whitespace-pre-wrap rounded-lg border border-border bg-secondary/50 py-4 pl-14 pr-4 text-sm leading-7 text-foreground outline-none focus:ring-2 focus:ring-primary/50"
             />
+            {inlineAutocomplete && editorRawCaretOffset !== null && (
+              <div
+                aria-hidden="true"
+                data-testid="inline-combo-autocomplete"
+                className="pointer-events-none absolute inset-0 z-10 h-36 overflow-hidden whitespace-pre-wrap rounded-lg py-4 pl-14 pr-4 text-sm leading-7 text-transparent"
+              >
+                <div style={{ transform: `translateY(-${editorScrollTop}px)` }}>
+                  <span>{comboText.slice(0, inlineAutocomplete.caretRawOffset)}</span>
+                  <span className="text-muted-foreground/35">
+                    {inlineAutocomplete.completion}
+                  </span>
+                </div>
+              </div>
+            )}
             {activeCardSuggestions.length > 0 && (
               <div className="absolute inset-x-4 bottom-4 z-20 rounded-xl border border-lime-300/30 bg-background/95 p-2 shadow-2xl backdrop-blur">
                 <div className="mb-1 px-2 text-[10px] font-display font-semibold uppercase tracking-[0.18em] text-lime-300/80">

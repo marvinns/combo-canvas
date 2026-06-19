@@ -1,9 +1,12 @@
-import { Fragment, useEffect, useMemo, useState, type DragEvent } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import {
   createCombinedDeckAssignmentFromTexts,
   createDeckAssignment,
   getDeckBlockingErrors,
+  getComboLibraryBackup,
   getSavedCombos,
+  importComboLibraryBackup,
+  normalizeComboLibraryBackup,
   saveCombo,
   updateCombo,
   renameDeck,
@@ -25,7 +28,8 @@ import {
 } from '@/lib/comboLibrary';
 import { useCardImage } from '@/hooks/useCardImage';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog';
-import { ChevronDown, ChevronRight, Grid2X2, List, Search, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, Grid2X2, Info, List, Search, X } from 'lucide-react';
+import seedBackup from '@/data/combo-library-seed.json';
 
 interface ComboLibraryProps {
   currentText: string;
@@ -44,6 +48,7 @@ const UNCATEGORIZED_SUBSECTION = '__uncategorized__';
 const COMBO_LIBRARY_VIEW_KEY = 'combo-library-view';
 const COMBO_LIBRARY_DECK_KEY = 'combo-library-selected-deck';
 const DECK_COLORS_STORAGE_KEY = 'combo-library-deck-colors';
+const GITHUB_SEED_BACKUP = normalizeComboLibraryBackup(seedBackup);
 type ComboLibraryView = 'cards' | 'compact';
 type ComboDropPlacement = 'before' | 'after';
 
@@ -451,6 +456,7 @@ function ComboLibraryCard({
   onRename,
   onLoad,
   onViewDeck,
+  onOpenNotes,
   onDuplicate,
   onStartRename,
   onDelete,
@@ -473,6 +479,7 @@ function ComboLibraryCard({
   onRename: () => void;
   onLoad: () => void;
   onViewDeck: () => void;
+  onOpenNotes: () => void;
   onDuplicate: () => void;
   onStartRename: () => void;
   onDelete: () => void;
@@ -588,6 +595,23 @@ function ComboLibraryCard({
               type="button"
               onClick={(event) => {
                 event.stopPropagation();
+                onOpenNotes();
+              }}
+              className={`group/notes relative flex h-8 w-8 items-center justify-center rounded-full border bg-background/50 text-sm backdrop-blur transition-colors hover:text-foreground ${
+                combo.notes?.trim()
+                  ? 'border-primary/45 text-primary'
+                  : 'border-border/60 text-muted-foreground'
+              }`}
+              aria-label={`Open notes for ${combo.name}`}
+              title="Notes"
+            >
+              <Info className="h-4 w-4" />
+              <ComboNotesHoverPreview notes={combo.notes} />
+            </button>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
                 onDuplicate();
               }}
               className="rounded-full border border-border/60 bg-background/50 px-3 py-1.5 text-xs font-display font-semibold text-muted-foreground backdrop-blur transition-colors hover:text-foreground"
@@ -620,6 +644,17 @@ function ComboLibraryCard({
       </div>
       </div>
     </div>
+  );
+}
+
+function ComboNotesHoverPreview({ notes }: { notes?: string }) {
+  const trimmedNotes = notes?.trim();
+  if (!trimmedNotes) return null;
+
+  return (
+    <span className="pointer-events-none absolute bottom-full right-0 z-50 mb-2 hidden max-h-48 w-max min-w-[12rem] max-w-[min(22rem,70vw)] overflow-y-auto whitespace-pre-wrap rounded-xl border border-border/60 bg-background/80 px-3 py-2 text-left text-xs leading-5 text-foreground/90 shadow-2xl backdrop-blur-md group-hover/notes:block group-focus-visible/notes:block">
+      {trimmedNotes}
+    </span>
   );
 }
 
@@ -767,7 +802,7 @@ function DeckView({
     <div className="mt-3 space-y-3 rounded-xl border border-border/60 bg-background/40 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="font-display text-base font-bold text-foreground">{draftDeck.name}</h3>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <span className={`rounded-full border px-2 py-1 text-[10px] font-display font-semibold ${validation.isValid ? 'border-emerald-300/30 bg-emerald-300/10 text-emerald-300' : 'border-destructive/40 bg-destructive/10 text-destructive'}`}>
             {validation.isValid ? 'Legal deck' : 'Illegal deck'}
           </span>
@@ -888,6 +923,7 @@ function ComboLibraryCompactRow({
   onRename,
   onLoad,
   onViewDeck,
+  onOpenNotes,
   onDuplicate,
   onStartRename,
   onDelete,
@@ -908,6 +944,7 @@ function ComboLibraryCompactRow({
   onRename: () => void;
   onLoad: () => void;
   onViewDeck: () => void;
+  onOpenNotes: () => void;
   onDuplicate: () => void;
   onStartRename: () => void;
   onDelete: () => void;
@@ -1005,6 +1042,20 @@ function ComboLibraryCompactRow({
         )}
         <button
           type="button"
+          onClick={onOpenNotes}
+          className={`group/notes relative flex h-8 w-8 items-center justify-center rounded-full border bg-background/50 text-sm transition-colors hover:text-foreground ${
+            combo.notes?.trim()
+              ? 'border-primary/45 text-primary'
+              : 'border-border/60 text-muted-foreground'
+          }`}
+          aria-label={`Open notes for ${combo.name}`}
+          title="Notes"
+        >
+          <Info className="h-4 w-4" />
+          <ComboNotesHoverPreview notes={combo.notes} />
+        </button>
+        <button
+          type="button"
           onClick={onDuplicate}
           className="rounded-full border border-border/60 bg-background/50 px-3 py-1.5 text-xs font-display font-semibold text-muted-foreground transition-colors hover:text-foreground"
         >
@@ -1070,7 +1121,11 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
   const [expandedTreeSubsections, setExpandedTreeSubsections] = useState<string[]>([]);
   const [draggedComboId, setDraggedComboId] = useState<string | null>(null);
   const [colorPickerDeck, setColorPickerDeck] = useState<string | null>(null);
+  const [notesComboId, setNotesComboId] = useState<string | null>(null);
+  const [notesDraft, setNotesDraft] = useState('');
+  const [dataTransferMessage, setDataTransferMessage] = useState('');
   const [, setDeckColorRevision] = useState(0);
+  const importFileInputRef = useRef<HTMLInputElement>(null);
   const deckOptions = useMemo(() => Array.from(new Set(combos.map(getComboDeckName)))
     .filter((deck) => deck !== 'Unassigned')
     .sort((a, b) => a.localeCompare(b)), [combos]);
@@ -1100,6 +1155,8 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
       ? deckFilteredCombos.filter((combo) => !combo.subsectionId)
       : deckFilteredCombos.filter((combo) => combo.subsectionId === selectedSubsection);
   const visibleCombos = subsectionFilteredCombos.filter((combo) => doesComboMatchSearch(combo, searchQuery));
+  const notesCombo = notesComboId ? combos.find((combo) => combo.id === notesComboId) : undefined;
+  const hasGithubSeedData = GITHUB_SEED_BACKUP.combos.length > 0 || Object.keys(GITHUB_SEED_BACKUP.subsections).length > 0;
   const compactDeckTree = useMemo(() => deckOptions.flatMap((deckName) => {
     const deckCombos = combos.filter((combo) => getComboDeckName(combo) === deckName);
     const subsections = getDeckSubsections(deckName);
@@ -1482,6 +1539,69 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
     onSave?.(copiedCombo);
   };
 
+  const handleOpenNotes = (combo: SavedCombo) => {
+    setNotesComboId(combo.id);
+    setNotesDraft(combo.notes || '');
+  };
+
+  const handleSaveNotes = () => {
+    if (!notesComboId) return;
+    const updatedCombo = updateCombo(notesComboId, { notes: notesDraft });
+    if (!updatedCombo) return;
+
+    setCombos((current) => current.map((combo) => combo.id === notesComboId ? updatedCombo : combo));
+    if (activeComboId === notesComboId) {
+      onSave?.(updatedCombo);
+    }
+    setNotesComboId(null);
+    setNotesDraft('');
+  };
+
+  const applyLibraryBackup = (backupValue: unknown, successMessage: string) => {
+    const imported = importComboLibraryBackup(backupValue);
+    setCombos(imported.combos);
+    setSubsectionRevision((current) => current + 1);
+    setSelectedDeck('all');
+    setSelectedSubsection(ALL_SUBSECTIONS);
+    setEditingComboId(null);
+    setViewingDeckComboId(null);
+    setDataTransferMessage(successMessage);
+  };
+
+  const handleExportLibraryData = () => {
+    const backup = getComboLibraryBackup();
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'combo-library-backup.json';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setDataTransferMessage('Downloaded combo-library-backup.json. To ship it with GitHub, replace src/data/combo-library-seed.json with that file.');
+  };
+
+  const handleImportLibraryFile = async (file?: File) => {
+    if (!file) return;
+
+    try {
+      const parsed = JSON.parse(await file.text());
+      applyLibraryBackup(parsed, 'Imported combo library data into this browser.');
+    } catch {
+      setDataTransferMessage('Could not import that file. Please choose a valid combo-library JSON backup.');
+    } finally {
+      if (importFileInputRef.current) {
+        importFileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleLoadGithubSeed = () => {
+    if (!hasGithubSeedData) return;
+    applyLibraryBackup(GITHUB_SEED_BACKUP, 'Loaded combo library data from the GitHub seed files.');
+  };
+
   const handleStartComboRename = (combo: SavedCombo) => {
     setEditingComboId(combo.id);
     setEditDeck(combo.deck || '');
@@ -1700,6 +1820,7 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
         onRename={handleRenameCombo}
         onLoad={() => onLoad(combo)}
         onViewDeck={() => setViewingDeckComboId((current) => current === combo.id ? null : combo.id)}
+        onOpenNotes={() => handleOpenNotes(combo)}
         onDuplicate={() => handleDuplicate(combo.id)}
         onStartRename={() => handleStartComboRename(combo)}
         onDelete={() => handleDelete(combo.id)}
@@ -1892,7 +2013,7 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
   return (
     <div className="glass-panel rounded-xl p-5 space-y-4">
       <div className="flex justify-end">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <div className="flex rounded-lg border border-border/70 bg-background/35 p-1" aria-label="Combo library view">
             <button
               type="button"
@@ -1918,6 +2039,36 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
             </button>
           </div>
           <button
+            type="button"
+            onClick={handleExportLibraryData}
+            className="rounded-lg border border-border bg-secondary/50 px-3 py-2 text-xs font-display font-semibold text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Export Data
+          </button>
+          <button
+            type="button"
+            onClick={() => importFileInputRef.current?.click()}
+            className="rounded-lg border border-border bg-secondary/50 px-3 py-2 text-xs font-display font-semibold text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Import Data
+          </button>
+          <input
+            ref={importFileInputRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={(event) => void handleImportLibraryFile(event.target.files?.[0])}
+          />
+          <button
+            type="button"
+            onClick={handleLoadGithubSeed}
+            disabled={!hasGithubSeedData}
+            className="rounded-lg border border-border bg-secondary/50 px-3 py-2 text-xs font-display font-semibold text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+            title={hasGithubSeedData ? 'Load committed seed data from src/data' : 'Replace src/data/combo-library-seed.json with an exported backup first'}
+          >
+            Load GitHub Data
+          </button>
+          <button
             onClick={() => setShowSave(!showSave)}
             disabled={!currentText.trim()}
             className="px-4 py-2 bg-primary/90 text-primary-foreground font-display font-semibold rounded-lg text-xs hover:brightness-110 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
@@ -1936,6 +2087,11 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
           className="h-11 w-full rounded-lg border border-border/70 bg-background/35 pl-10 pr-4 font-body text-sm text-foreground outline-none transition-all placeholder:text-muted-foreground/65 focus:border-primary/45 focus:bg-background/55 focus:ring-2 focus:ring-primary/25"
         />
       </label>
+      {dataTransferMessage && (
+        <p className="rounded-lg border border-primary/25 bg-primary/10 px-3 py-2 text-xs text-primary">
+          {dataTransferMessage}
+        </p>
+      )}
 
       {activeComboId && (
         <div className="flex justify-end gap-2">
@@ -2380,6 +2536,7 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
                         onRename={handleRenameCombo}
                         onLoad={() => onLoad(combo)}
                         onViewDeck={() => setViewingDeckComboId((current) => current === combo.id ? null : combo.id)}
+                        onOpenNotes={() => handleOpenNotes(combo)}
                         onDuplicate={() => handleDuplicate(combo.id)}
                         onStartRename={() => handleStartComboRename(combo)}
                         onDelete={() => handleDelete(combo.id)}
@@ -2402,6 +2559,56 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
           </div>
         </div>
       )}
+      <Dialog
+        open={Boolean(notesCombo)}
+        onOpenChange={(open) => {
+          if (open) return;
+          setNotesComboId(null);
+          setNotesDraft('');
+        }}
+      >
+        <DialogContent className="max-w-2xl border-border bg-background/95 p-6 text-foreground shadow-2xl backdrop-blur">
+          <DialogTitle className="font-display text-2xl font-semibold">
+            Notes for {notesCombo?.name || 'combo'}
+          </DialogTitle>
+          <DialogDescription>
+            View or write private notes for this saved combo.
+          </DialogDescription>
+          <div className="mt-4 space-y-3">
+            <textarea
+              aria-label="Combo notes"
+              value={notesDraft}
+              onChange={(event) => setNotesDraft(event.target.value)}
+              placeholder="Write matchup notes, reminders, restrictions, alternate lines..."
+              className="min-h-[220px] w-full resize-y rounded-xl border border-border bg-secondary/45 px-4 py-3 text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground/50 focus:ring-2 focus:ring-primary/50"
+            />
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span className="text-xs text-muted-foreground">
+                {notesDraft.trim() ? `${notesDraft.trim().length} characters` : 'No notes yet'}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNotesComboId(null);
+                    setNotesDraft('');
+                  }}
+                  className="rounded-xl border border-border/70 bg-secondary/40 px-4 py-2 text-sm font-display font-semibold text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveNotes}
+                  className="rounded-xl bg-primary px-5 py-2 text-sm font-display font-semibold text-primary-foreground transition-all hover:brightness-110"
+                >
+                  Save Notes
+                </button>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
