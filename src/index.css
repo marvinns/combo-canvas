@@ -197,6 +197,38 @@
   border-radius: 4px;
 }
 
+.deck-search-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border) / 0.7) transparent;
+  scrollbar-gutter: stable;
+  overscroll-behavior-y: contain;
+  scroll-padding-block: 0.5rem;
+}
+
+.deck-search-scroll:hover,
+.deck-search-scroll:focus-within {
+  scrollbar-color: hsl(var(--primary) / 0.5) transparent;
+}
+
+.deck-search-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.deck-search-scroll::-webkit-scrollbar-track {
+  background: transparent;
+  margin-block: 8px;
+}
+
+.deck-search-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: hsl(var(--border) / 0.7);
+}
+
+.deck-search-scroll:hover::-webkit-scrollbar-thumb,
+.deck-search-scroll:focus-within::-webkit-scrollbar-thumb {
+  background: hsl(var(--primary) / 0.5);
+}
+
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
@@ -414,6 +446,8 @@
 }
 
 .border-glow-inner {
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   position: relative;
@@ -473,4 +507,65 @@
   opacity: 0.58;
   filter: sepia(1) saturate(6) hue-rotate(336deg) brightness(1.08);
   mix-blend-mode: screen;
+}
+
+/* Scale cards reuse the breakdown's gradient border and edge-light layers.
+   Only the masked light angle changes; card artwork and transforms stay intact. */
+@property --scale-glow-angle {
+  syntax: "<angle>";
+  initial-value: 45deg;
+  inherits: false;
+}
+
+.scale-border-glow.border-glow-card {
+  --edge-proximity: 100;
+  --cursor-angle: var(--scale-glow-angle);
+  --border-radius: inherit;
+  --glow-padding: 18px;
+  --fill-opacity: 0;
+  position: absolute;
+  inset: -2px;
+  z-index: 0;
+  display: block;
+  border-radius: inherit;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  pointer-events: none;
+  animation: scale-border-sweep 6s linear infinite;
+}
+
+.scale-border-glow::after {
+  display: none;
+}
+
+@keyframes scale-border-sweep {
+  from { --scale-glow-angle: 45deg; }
+  to { --scale-glow-angle: 405deg; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scale-border-glow.border-glow-card {
+    animation: none;
+  }
+  .scale-border-glow::before,
+  .scale-border-glow > .edge-light {
+    transition: none;
+  }
+}
+
+/* Mirror the whole light layer, including its gradient, without flipping artwork.
+   Both scales share the same timing so the highlights remain symmetrical. */
+.scale-border-glow[data-scale-side="right"] {
+  transform: translate3d(0, 0, 0.01px) scaleX(-1);
+}
+
+/* Keep the layout and final states while respecting the system motion preference. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

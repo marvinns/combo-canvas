@@ -1,3 +1,4 @@
+import { useReducedMotion } from '@/hooks/useReducedMotion';
 import { useEffect, useRef, useState } from 'react';
 import { Mesh, Program, Renderer, Triangle } from 'ogl';
 import './SideRays.css';
@@ -132,6 +133,14 @@ export function SideRays({
   const cleanupRef = useRef<(() => void) | null>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
   const [isVisible, setIsVisible] = useState(false);
+  const reducedMotion = useReducedMotion();
+  const [pageVisible, setPageVisible] = useState(!document.hidden);
+
+  useEffect(() => {
+    const updateVisibility = () => setPageVisible(!document.hidden);
+    document.addEventListener('visibilitychange', updateVisibility);
+    return () => document.removeEventListener('visibilitychange', updateVisibility);
+  }, []);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -149,7 +158,7 @@ export function SideRays({
   }, []);
 
   useEffect(() => {
-    if (!isVisible || !containerRef.current) return;
+    if (!isVisible || !pageVisible || !containerRef.current) return;
 
     cleanupRef.current?.();
     cleanupRef.current = null;
@@ -205,13 +214,14 @@ export function SideRays({
         const { clientWidth: width, clientHeight: height } = containerRef.current;
         renderer.setSize(width, height);
         uniforms.iResolution.value = [width * renderer.dpr, height * renderer.dpr];
+        if (reducedMotion) renderer.render({ scene: mesh });
       };
 
       const loop = (time: number) => {
         if (!rendererRef.current || !uniformsRef.current || !meshRef.current) return;
-        uniforms.iTime.value = time * 0.001;
+        uniforms.iTime.value = reducedMotion ? 0 : time * 0.001;
         renderer.render({ scene: mesh });
-        animationIdRef.current = requestAnimationFrame(loop);
+        if (!reducedMotion) animationIdRef.current = requestAnimationFrame(loop);
       };
 
       window.addEventListener('resize', updateSize);
@@ -243,7 +253,7 @@ export function SideRays({
       cleanupRef.current?.();
       cleanupRef.current = null;
     };
-  }, [isVisible, speed, rayColor1, rayColor2, intensity, spread, origin, tilt, saturation, blend, falloff, opacity]);
+  }, [isVisible, pageVisible, reducedMotion, speed, rayColor1, rayColor2, intensity, spread, origin, tilt, saturation, blend, falloff, opacity]);
 
   useEffect(() => {
     if (!uniformsRef.current) return;

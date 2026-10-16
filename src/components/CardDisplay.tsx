@@ -1,14 +1,18 @@
-import { createContext, useContext, useEffect, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { getCardHudAnchor, type CardHudAnchor } from '@/lib/cardHud';
+import { useReducedMotion } from '@/hooks/useReducedMotion';
+import { createContext, useContext, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { useCardImage, useRelatedCards } from '@/hooks/useCardImage';
-import type { CardZone, ComboAction } from '@/lib/comboParser';
+import type { CardZone, ComboAction, ScaleSide } from '@/lib/comboParser';
 import { cn } from '@/lib/utils';
 import { AnimatePresence, motion } from 'motion/react';
-import { LayersPlus, Plus, Skull } from 'lucide-react';
+import { Info, LayersPlus, Plus, Skull } from 'lucide-react';
 import { EFFECT_STYLES, EffectGlyph } from './ActionIcon';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog';
 
-type CardStatus = ComboAction['type'] | 'special-summon' | 'normal-summon';
+export type CardStatus = ComboAction['type'] | 'special-summon' | 'normal-summon';
 export type CardDisplaySize = 'default' | 'desktop-full';
+export type CardNoteMap = Record<string, string>;
 const CardDisplaySizeContext = createContext<CardDisplaySize>('default');
 const CARD_CYCLE_INTERVAL_MS = 2000;
 
@@ -48,6 +52,7 @@ function getCardDimensions(size: CardDisplaySize) {
 }
 
 const CARD_STATUS_STYLES: Record<CardStatus, { label: string; text: string; bg: string; border: string; iconType?: ComboAction['type']; symbolOnly?: boolean }> = {
+  equip: { label: 'Equipped', text: 'text-amber-300', bg: 'bg-amber-300/10', border: 'border-amber-300/30' },
   summon: { label: 'Summon', text: 'text-pink-400', bg: 'bg-pink-400/10', border: 'border-pink-400/30' },
   'special-summon': { label: 'SS', text: 'text-pink-400', bg: 'bg-pink-400/10', border: 'border-pink-400/30' },
   'normal-summon': { label: 'NS', text: 'text-amber-700', bg: 'bg-amber-700/15', border: 'border-amber-700/40' },
@@ -72,7 +77,7 @@ const CARD_STATUS_STYLES: Record<CardStatus, { label: string; text: string; bg: 
   discard: { label: 'Discarded', text: 'text-muted-foreground', bg: 'bg-muted/20', border: 'border-muted-foreground/30' },
   detach: { label: 'Detached', text: 'text-yellow-200', bg: 'bg-yellow-200/10', border: 'border-yellow-200/30' },
   reveal: { label: 'Revealed', text: 'text-teal-300', bg: 'bg-teal-300/10', border: 'border-teal-300/30' },
-  continuous: { label: '', text: 'text-cyan-200', bg: 'bg-cyan-300/10', border: 'border-cyan-300/30', iconType: 'continuous', symbolOnly: true },
+  continuous: { label: 'Continuous Spell', text: 'text-cyan-200', bg: 'bg-cyan-300/10', border: 'border-cyan-300/30' },
   'field-spell': { label: 'Field Spell Zone', text: 'text-lime-300', bg: 'bg-lime-300/10', border: 'border-lime-300/30' },
   generic: { label: 'Affected', text: 'text-muted-foreground', bg: 'bg-muted/20', border: 'border-muted-foreground/30' },
 };
@@ -93,11 +98,166 @@ function CardStatusBadge({ status }: { status: CardStatus }) {
   );
 }
 
+export function CardHudCallout({
+  anchorRect,
+  text,
+}: {
+  anchorRect?: CardHudAnchor | null;
+  cardName?: string;
+  text: string;
+}) {
+  if (!anchorRect) return null;
+
+  const viewportWidth = typeof window === 'undefined' ? 1024 : window.innerWidth;
+  const viewportHeight = typeof window === 'undefined' ? 768 : window.innerHeight;
+  const margin = 12;
+  const gap = 24;
+  const boxHeight = 48;
+  const minBoxWidth = 220;
+  const preferredBoxWidth = 360;
+  const availableRight = viewportWidth - anchorRect.right - gap - margin;
+  const maxBoxWidth = Math.max(180, viewportWidth - (margin * 2));
+  const boxWidth = Math.min(preferredBoxWidth, maxBoxWidth);
+  const preferredBoxLeft = availableRight >= minBoxWidth
+    ? anchorRect.right + gap
+    : Math.max(anchorRect.right + 8, viewportWidth - boxWidth - margin);
+  const boxLeft = Math.min(
+    Math.max(margin, preferredBoxLeft),
+    Math.max(margin, viewportWidth - boxWidth - margin),
+  );
+  const anchorX = anchorRect.right;
+  const anchorY = anchorRect.bottom;
+  const bottomAlignedBoxTop = viewportHeight - boxHeight - 56;
+  const lowerBoxTop = Math.max(anchorRect.bottom + 104, bottomAlignedBoxTop);
+  const boxTop = Math.min(
+    Math.max(lowerBoxTop, margin),
+    Math.max(margin, viewportHeight - boxHeight - margin),
+  );
+  const boxCenterY = boxTop + (boxHeight / 2);
+  const elbowX = Math.max(anchorX + 8, boxLeft - 22);
+
+  const callout = (
+    <motion.aside
+      className="pointer-events-none fixed inset-0 z-[70] overflow-visible text-cyan-300"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.22, ease: 'easeOut' }}
+      role="status"
+      aria-live="polite"
+    >
+      <svg className="absolute inset-0 h-full w-full overflow-visible drop-shadow-[0_0_10px_rgba(0,212,255,0.42)]">
+        <motion.circle
+          cx={anchorX}
+          cy={anchorY}
+          r="5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          initial={{ opacity: 0, scale: 0 }}
+          animate={{ opacity: 1, scale: [0, 1.35, 1] }}
+          transition={{ duration: 0.28, ease: 'easeOut' }}
+          style={{ transformOrigin: `${anchorX}px ${anchorY}px` }}
+        />
+        <motion.circle
+          cx={anchorX}
+          cy={anchorY}
+          r="2.5"
+          fill="currentColor"
+          initial={{ opacity: 0, scale: 0 }}
+          animate={{ opacity: 1, scale: [0, 1.35, 1] }}
+          transition={{ duration: 0.28, ease: 'easeOut' }}
+          style={{ transformOrigin: `${anchorX}px ${anchorY}px` }}
+        />
+        <motion.polyline
+          points={`${anchorX},${anchorY} ${elbowX},${boxCenterY} ${boxLeft},${boxCenterY}`}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeDasharray="5 3"
+          initial={{ pathLength: 0, opacity: 0 }}
+          animate={{ pathLength: 1, opacity: 1 }}
+          transition={{ delay: 0.16, duration: 0.42, ease: 'easeOut' }}
+        />
+      </svg>
+      <motion.div
+        className="absolute overflow-hidden rounded-[2px] border border-cyan-300/90 bg-slate-950/60 shadow-[0_0_12px_rgba(0,212,255,0.22)] backdrop-blur-sm"
+        style={{
+          left: `${boxLeft}px`,
+          top: `${boxTop}px`,
+          width: `${boxWidth}px`,
+          height: `${boxHeight}px`,
+          transformOrigin: 'left center',
+        }}
+        initial={{ opacity: 0, scaleX: 0 }}
+        animate={{ opacity: 1, scaleX: 1 }}
+        transition={{ delay: 0.52, duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+      >
+        <div className="absolute left-0 top-0 h-2.5 w-2.5 border-l-2 border-t-2 border-cyan-300" aria-hidden="true" />
+        <div className="absolute right-0 top-0 h-2.5 w-2.5 border-r-2 border-t-2 border-cyan-300" aria-hidden="true" />
+        <div className="absolute bottom-0 left-0 h-2.5 w-2.5 border-b-2 border-l-2 border-cyan-300" aria-hidden="true" />
+        <div className="absolute bottom-0 right-0 h-2.5 w-2.5 border-b-2 border-r-2 border-cyan-300" aria-hidden="true" />
+        <motion.p
+          className="flex h-full items-center overflow-hidden whitespace-pre-wrap break-words px-3 font-mono text-[11px] font-semibold leading-snug text-cyan-300"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.84, duration: 0.2 }}
+        >
+          {text}
+        </motion.p>
+      </motion.div>
+    </motion.aside>
+  );
+
+  return createPortal(callout, document.body);
+}
+
+export function CardInfoEditorPanel({
+  cardName,
+  value,
+  onChange,
+}: {
+  cardName: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <aside className="flex h-full w-[min(34vw,380px)] min-w-[280px] flex-col rounded-2xl border border-cyan-200/20 bg-cyan-200/[0.06] p-3 text-white shadow-[0_24px_80px_rgba(0,0,0,0.35)] backdrop-blur-md max-md:absolute max-md:inset-x-3 max-md:bottom-3 max-md:h-[42dvh] max-md:w-auto max-md:min-w-0">
+      <div className="shrink-0 border-b border-cyan-200/15 pb-3">
+        <p className="text-xs font-display font-semibold uppercase text-cyan-100/65">Card info</p>
+        <p className="mt-1 line-clamp-2 text-sm font-display font-semibold text-white/90">
+          {cardName}
+        </p>
+      </div>
+      <label className="mt-3 min-h-0 flex-1">
+        <span className="sr-only">Additional information for {cardName}</span>
+        <textarea
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="Add notes, timing, reminders..."
+          className="h-full min-h-36 w-full resize-none rounded-xl border border-cyan-200/20 bg-black/35 p-3 text-sm leading-relaxed text-white outline-none placeholder:text-white/35 focus:border-cyan-200/45 focus:ring-2 focus:ring-cyan-200/25"
+        />
+      </label>
+    </aside>
+  );
+}
+
+export function CardActivationOverlay({ className }: { className?: string }) {
+  return (
+    <div className={cn('activate-cursor', className)} aria-hidden="true">
+      <div className={`flex h-8 w-8 items-center justify-center rounded-full border bg-secondary/90 ${EFFECT_STYLES.activate.border}`}>
+        <EffectGlyph type="activate" className="h-4 w-4" />
+      </div>
+    </div>
+  );
+}
+
 function HandZoneIcon({ className }: { className?: string }) {
+  const reducedMotion = useReducedMotion();
   return (
     <div className={cn(className)}>
       <motion.svg
-        animate="animate"
+        animate={reducedMotion ? 'normal' : 'animate'}
         fill="none"
         height={14}
         initial="normal"
@@ -130,24 +290,33 @@ function HandZoneIcon({ className }: { className?: string }) {
   );
 }
 
-function ExtraDeckZoneIcon({ className }: { className?: string }) {
+function ScaleBorderGlow({ side }: { side?: ScaleSide }) {
+  return (
+    <span aria-hidden="true" data-scale-border-glow data-scale-side={side} className="border-glow-card sweep-active scale-border-glow">
+      <span className="edge-light" />
+    </span>
+  );
+}
+
+export function ExtraDeckZoneIcon({ className, size = 14 }: { className?: string; size?: number }) {
+  const reducedMotion = useReducedMotion();
   return (
     <div className={cn(className)}>
       <motion.svg
         fill="none"
-        height={14}
+        height={size}
         initial="normal"
         stroke="currentColor"
         strokeLinecap="round"
         strokeLinejoin="round"
         strokeWidth="2"
         viewBox="0 0 24 24"
-        width={14}
+        width={size}
         xmlns="http://www.w3.org/2000/svg"
       >
         <path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z" />
         <motion.path
-          animate="animate"
+          animate={reducedMotion ? 'normal' : 'animate'}
           d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"
           variants={{
             normal: { y: 0 },
@@ -164,7 +333,7 @@ function ExtraDeckZoneIcon({ className }: { className?: string }) {
           }}
         />
         <motion.path
-          animate="animate"
+          animate={reducedMotion ? 'normal' : 'animate'}
           d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"
           variants={{
             normal: { y: 0 },
@@ -195,9 +364,13 @@ const ZONE_META: Record<CardZone, { label: string; className: string; Icon?: typ
 
 export function CardDisplay({
   name,
+  artworkOnly = false,
+  onPreviewOpenChange,
   customTag,
   actionType,
   useStarBorder = true,
+  scaleSide,
+  isScale = false,
   zone,
   originZone,
   statuses = [],
@@ -208,11 +381,17 @@ export function CardDisplay({
   compact = false,
   showZoneBadge = true,
   size,
+  cardInfo,
+  onCardInfoChange,
 }: {
   name: string;
+  artworkOnly?: boolean;
+  onPreviewOpenChange?: (open: boolean) => void;
   customTag?: string;
   actionType?: ComboAction['type'];
   useStarBorder?: boolean;
+  scaleSide?: ScaleSide;
+  isScale?: boolean;
   zone?: CardZone;
   originZone?: CardZone;
   statuses?: CardStatus[];
@@ -223,23 +402,48 @@ export function CardDisplay({
   compact?: boolean;
   showZoneBadge?: boolean;
   size?: CardDisplaySize;
+  cardInfo?: string;
+  onCardInfoChange?: (value: string) => void;
 }) {
+  const isScaleCard = isScale || actionType === 'scale' || statuses.includes('scale');
   const slotCardNames = getSlotCardNames(name);
   const [activeCardIndex, setActiveCardIndex] = useState(0);
   const activeCardName = slotCardNames[activeCardIndex] || slotCardNames[0];
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [previewCardName, setPreviewCardName] = useState(activeCardName);
   const [showRelatedCards, setShowRelatedCards] = useState(false);
+  const [showCardInfoEditor, setShowCardInfoEditor] = useState(false);
+  const [localCardInfo, setLocalCardInfo] = useState(cardInfo ?? '');
+  const [isHudVisible, setIsHudVisible] = useState(false);
+  const [hudAnchorRect, setHudAnchorRect] = useState<CardHudAnchor | null>(null);
+  useEffect(() => {
+    if (!isHudVisible) return;
+    const hideOnScroll = () => setIsHudVisible(false);
+    window.addEventListener('scroll', hideOnScroll, { capture: true, passive: true });
+    window.addEventListener('resize', hideOnScroll);
+    return () => {
+      window.removeEventListener('scroll', hideOnScroll, true);
+      window.removeEventListener('resize', hideOnScroll);
+    };
+  }, [isHudVisible]);
+
+  const cardArtworkRef = useRef<HTMLDivElement>(null);
   const { data, isLoading } = useCardImage(activeCardName);
   const { data: previewData, isLoading: isPreviewLoading } = useCardImage(previewCardName);
   const {
     data: relatedCardsData,
     isLoading: areRelatedCardsLoading,
   } = useRelatedCards(previewData?.name || previewCardName, isPreviewOpen && showRelatedCards);
-  const zoneMeta = zone ? ZONE_META[zone] : undefined;
+  useEffect(() => {
+    onPreviewOpenChange?.(isPreviewOpen);
+  }, [isPreviewOpen, onPreviewOpenChange]);
+  const isSummonedFromOffFieldZone = statuses.includes('special-summon') && (zone === 'gy' || zone === 'banished');
+  const zoneMeta = zone && !isSummonedFromOffFieldZone ? ZONE_META[zone] : undefined;
   const originZoneMeta = originZone ? ZONE_META[originZone] : undefined;
   const cardLabel = data?.name || activeCardName;
   const previewCardLabel = previewData?.name || previewCardName;
+  const displayedCardInfo = cardInfo ?? localCardInfo;
+  const trimmedCardInfo = displayedCardInfo.trim();
   const isPreviewEnabled = !compact;
   const inheritedSize = useContext(CardDisplaySizeContext);
   const resolvedSize = size ?? inheritedSize;
@@ -263,13 +467,34 @@ export function CardDisplay({
     if (!isPreviewOpen) {
       setPreviewCardName(cardLabel);
       setShowRelatedCards(false);
+      setShowCardInfoEditor(false);
     }
   }, [cardLabel, isPreviewOpen]);
+
+  useEffect(() => {
+    if (cardInfo !== undefined) {
+      setLocalCardInfo(cardInfo);
+    }
+  }, [cardInfo]);
 
   const openPreview = () => {
     if (!isPreviewEnabled) return;
     setPreviewCardName(cardLabel);
     setIsPreviewOpen(true);
+  };
+
+  const updateCardInfo = (value: string) => {
+    setLocalCardInfo(value);
+    onCardInfoChange?.(value);
+  };
+
+  const showHud = () => {
+    setHudAnchorRect(cardArtworkRef.current ? getCardHudAnchor(cardArtworkRef.current.getBoundingClientRect()) : null);
+    setIsHudVisible(true);
+  };
+
+  const hideHud = () => {
+    setIsHudVisible(false);
   };
 
   const handleCardKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -381,7 +606,8 @@ export function CardDisplay({
             {originZoneBadge}
           </div>
       )}
-      <div className="h-full w-full">
+      {isScaleCard && <ScaleBorderGlow side={scaleSide} />}
+      <div className="relative z-[1] h-full w-full">
           {cardContent}
         </div>
       </div>
@@ -390,12 +616,16 @@ export function CardDisplay({
 
   const cardArtwork = (
     <div
+      ref={cardArtworkRef}
       className={cn(
         'relative transition-transform duration-200',
+        artworkOnly && 'h-full w-full',
         isPreviewEnabled && 'cursor-zoom-in hover:scale-[1.02] focus-visible:scale-[1.02]',
       )}
       onDoubleClick={openPreview}
       onKeyDown={handleCardKeyDown}
+      onMouseEnter={showHud}
+      onMouseLeave={hideHud}
       role={isPreviewEnabled ? 'button' : undefined}
       tabIndex={isPreviewEnabled ? 0 : undefined}
       aria-label={isPreviewEnabled ? `Open full screen view for ${cardLabel} with a double click` : undefined}
@@ -410,16 +640,11 @@ export function CardDisplay({
           {centerOverlay}
         </div>
       )}
-      {isActivated && (
-        <div className="activate-cursor" aria-hidden="true">
-          <div className={`flex h-8 w-8 items-center justify-center rounded-full border bg-secondary/90 ${EFFECT_STYLES.activate.border}`}>
-            <EffectGlyph type="activate" className="h-4 w-4" />
-          </div>
-        </div>
-      )}
+      {isActivated && <CardActivationOverlay />}
+      {isScaleCard && <ScaleBorderGlow side={scaleSide} />}
       <div
-        className="card-shadow border border-border/50 bg-secondary"
-        style={{ width: `${dimensions.width}px`, height: `${dimensions.height}px` }}
+        className="relative z-[1] card-shadow border border-border/50 bg-secondary"
+        style={artworkOnly ? { width: '100%', height: '100%' } : { width: `${dimensions.width}px`, height: `${dimensions.height}px` }}
       >
         {cardContent}
       </div>
@@ -428,6 +653,7 @@ export function CardDisplay({
 
   return (
     <>
+      {artworkOnly ? cardArtwork : (
       <div className="flex shrink-0 flex-col items-center" style={{ width: `${dimensions.width}px` }}>
         <div
           className="flex h-16 w-full shrink-0 flex-col items-center justify-end gap-1"
@@ -469,6 +695,12 @@ export function CardDisplay({
           {cardLabel}
         </span>
       </div>
+      )}
+      <AnimatePresence>
+        {isPreviewEnabled && !isPreviewOpen && isHudVisible && trimmedCardInfo && (
+          <CardHudCallout anchorRect={hudAnchorRect} cardName={cardLabel} text={trimmedCardInfo} />
+        )}
+      </AnimatePresence>
       <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
         <DialogContent className="left-0 top-0 h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 overflow-hidden border-0 bg-black/95 p-3 sm:rounded-none sm:p-6">
           <DialogTitle className="sr-only">{previewCardLabel}</DialogTitle>
@@ -477,25 +709,45 @@ export function CardDisplay({
           </DialogDescription>
           <div className="flex h-full w-full items-stretch justify-center gap-4 overflow-hidden">
             <div className="relative flex min-w-0 flex-1 items-center justify-center">
-              <button
-                type="button"
-                onClick={() => setShowRelatedCards((current) => !current)}
-                className="absolute right-3 top-3 z-20 flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/10 text-white shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur-md transition-all hover:border-white/30 hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 sm:right-5 sm:top-5"
-                aria-label={showRelatedCards ? 'Hide related cards' : 'Show related cards'}
-                title={showRelatedCards ? 'Hide related cards' : 'Show related cards'}
-              >
-                <Plus className={cn('h-5 w-5 transition-transform duration-200', showRelatedCards && 'rotate-45')} strokeWidth={2.3} />
-              </button>
+              <div className="absolute right-3 top-3 z-20 flex items-center gap-2 sm:right-5 sm:top-5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCardInfoEditor((current) => !current);
+                    setShowRelatedCards(false);
+                  }}
+                  className="flex h-10 w-10 items-center justify-center rounded-full border border-cyan-200/20 bg-cyan-200/10 text-cyan-50 shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur-md transition-all hover:border-cyan-200/40 hover:bg-cyan-200/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-100/50"
+                  aria-label={showCardInfoEditor ? 'Hide card info' : 'Show card info'}
+                  title={showCardInfoEditor ? 'Hide card info' : 'Show card info'}
+                >
+                  <Info className="h-5 w-5" strokeWidth={2.4} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowRelatedCards((current) => !current);
+                    setShowCardInfoEditor(false);
+                  }}
+                  className="flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/10 text-white shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur-md transition-all hover:border-white/30 hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
+                  aria-label={showRelatedCards ? 'Hide related cards' : 'Show related cards'}
+                  title={showRelatedCards ? 'Hide related cards' : 'Show related cards'}
+                >
+                  <Plus className={cn('h-5 w-5 transition-transform duration-200', showRelatedCards && 'rotate-45')} strokeWidth={2.3} />
+                </button>
+              </div>
               {isPreviewLoading ? (
                   <div className="flex h-16 w-16 items-center justify-center rounded-full border border-white/15 bg-white/5">
                     <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/70 border-t-transparent" />
                   </div>
                 ) : previewData ? (
+                  <div className="relative flex min-h-0 max-w-full rounded-2xl">
+                    {isScaleCard && previewCardName === activeCardName && <ScaleBorderGlow side={scaleSide} />}
                   <img
                     src={previewData.imageUrl}
                     alt={previewData.name}
-                    className="h-auto max-h-[calc(100dvh-2rem)] w-auto max-w-full rounded-2xl object-contain shadow-[0_24px_80px_rgba(0,0,0,0.55)] sm:max-h-[calc(100dvh-3rem)]"
+                    className="relative z-[1] h-auto max-h-[calc(100dvh-2rem)] w-auto max-w-full rounded-2xl object-contain shadow-[0_24px_80px_rgba(0,0,0,0.55)] sm:max-h-[calc(100dvh-3rem)]"
                   />
+                  </div>
                 ) : (
                   <div className="flex h-[min(calc(100dvh-2rem),720px)] w-[min(86vw,520px)] items-center justify-center rounded-[28px] border border-white/15 bg-white/5 p-8 text-center text-xl text-white/80 shadow-[0_24px_80px_rgba(0,0,0,0.55)] sm:h-[min(calc(100dvh-3rem),720px)]">
                     {previewCardLabel}
@@ -546,6 +798,13 @@ export function CardDisplay({
                   )}
                 </div>
               </aside>
+            )}
+            {showCardInfoEditor && (
+              <CardInfoEditorPanel
+                cardName={cardLabel}
+                value={displayedCardInfo}
+                onChange={updateCardInfo}
+              />
             )}
           </div>
         </DialogContent>

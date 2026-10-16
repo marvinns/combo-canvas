@@ -6,14 +6,18 @@ export interface SavedCombo {
   endboardSlots?: ComboEndboardSlots;
   stepComments?: ComboStepComments;
   comboLinks?: ComboStepLinks;
+  cardNotes?: ComboCardNotes;
   thumbnailCardName?: string;
   notes?: string;
+  playsAroundCards?: ComboPreviewCardList;
+  requiredCards?: ComboPreviewCardList;
   name: string;
   text: string;
   createdAt: number;
 }
 
 export interface ComboLibraryBackup {
+  deckNames?: string[];
   version: 1;
   exportedAt?: string;
   combos: SavedCombo[];
@@ -27,6 +31,8 @@ export interface ComboLibraryImportResult {
 
 export type ComboEndboardSlotCards = string | string[];
 export type ComboEndboardSlots = Partial<Record<string, ComboEndboardSlotCards>>;
+export type ComboPreviewCardList = string[];
+export type ComboCardNotes = Partial<Record<string, string>>;
 
 export interface ComboStepComment {
   text: string;
@@ -484,8 +490,11 @@ function normalizeSavedCombo(combo: Partial<SavedCombo>): SavedCombo | null {
   const endboardSlots = normalizeEndboardSlots(combo.endboardSlots);
   const stepComments = normalizeStepComments(combo.stepComments);
   const comboLinks = normalizeComboLinks(combo.comboLinks);
+  const cardNotes = normalizeCardNotes(combo.cardNotes);
   const thumbnailCardName = typeof combo.thumbnailCardName === 'string' ? combo.thumbnailCardName.trim() : '';
   const notes = typeof combo.notes === 'string' ? combo.notes.trim() : '';
+  const playsAroundCards = normalizeComboPreviewCardList(combo.playsAroundCards);
+  const requiredCards = normalizeComboPreviewCardList(combo.requiredCards);
   const subsectionId = typeof combo.subsectionId === 'string' ? combo.subsectionId.trim() : '';
 
   return {
@@ -496,12 +505,25 @@ function normalizeSavedCombo(combo: Partial<SavedCombo>): SavedCombo | null {
     endboardSlots,
     stepComments,
     comboLinks,
+    cardNotes,
     thumbnailCardName: thumbnailCardName || undefined,
     notes: notes || undefined,
+    playsAroundCards,
+    requiredCards,
     name: combo.name,
     text: combo.text,
     createdAt: combo.createdAt,
   };
+}
+
+function normalizeComboPreviewCardList(cards?: ComboPreviewCardList): ComboPreviewCardList | undefined {
+  if (!Array.isArray(cards)) return undefined;
+
+  const normalized = cards.flatMap((cardName) =>
+    typeof cardName === 'string' && cardName.trim() ? [cardName.trim()] : [],
+  );
+
+  return normalized.length > 0 ? Array.from(new Set(normalized)) : undefined;
 }
 
 function normalizeEndboardSlots(slots?: ComboEndboardSlots): ComboEndboardSlots | undefined {
@@ -587,6 +609,19 @@ function normalizeComboLinks(links?: ComboStepLinks): ComboStepLinks | undefined
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
+function normalizeCardNotes(notes?: ComboCardNotes): ComboCardNotes | undefined {
+  if (!notes || typeof notes !== 'object') return undefined;
+
+  const normalized = Object.entries(notes).reduce<ComboCardNotes>((result, [cardInstanceId, text]) => {
+    const trimmedId = cardInstanceId.trim();
+    if (!trimmedId || typeof text !== 'string' || !text.trim()) return result;
+    result[trimmedId] = text;
+    return result;
+  }, {});
+
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
 export function getSavedCombos(): SavedCombo[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -644,11 +679,29 @@ function saveDeckSubsections(subsections: Record<string, DeckSubsection[]>): voi
   localStorage.setItem(SUBSECTIONS_STORAGE_KEY, JSON.stringify(subsections));
 }
 
+const DECK_NAMES_STORAGE_KEY = 'combo-library-deck-names';
+
+export function getLibraryDeckNames(): string[] {
+  try {
+    const value = JSON.parse(localStorage.getItem(DECK_NAMES_STORAGE_KEY) || '[]');
+    return Array.isArray(value) ? value.filter((name): name is string => typeof name === 'string' && Boolean(name.trim())) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function createLibraryDeck(name: string): string[] {
+  const next = Array.from(new Set([...getLibraryDeckNames(), name.trim()].filter(Boolean)));
+  localStorage.setItem(DECK_NAMES_STORAGE_KEY, JSON.stringify(next));
+  return next;
+}
+
 export function getComboLibraryBackup(): ComboLibraryBackup {
   return {
     version: 1,
     exportedAt: new Date().toISOString(),
     combos: getSavedCombos(),
+    deckNames: getLibraryDeckNames(),
     subsections: getSavedDeckSubsections(),
   };
 }
@@ -671,6 +724,7 @@ export function normalizeComboLibraryBackup(value: unknown): ComboLibraryBackup 
     version: 1,
     exportedAt: typeof source.exportedAt === 'string' ? source.exportedAt : undefined,
     combos,
+    deckNames: Array.isArray(source.deckNames) ? source.deckNames.filter((name) => typeof name === 'string' && name.trim()) : [],
     subsections,
   };
 }
@@ -679,6 +733,7 @@ export function importComboLibraryBackup(value: unknown): ComboLibraryImportResu
   const backup = normalizeComboLibraryBackup(value);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(backup.combos));
   saveDeckSubsections(backup.subsections);
+  localStorage.setItem(DECK_NAMES_STORAGE_KEY, JSON.stringify(backup.deckNames || []));
   return {
     combos: backup.combos,
     subsections: backup.subsections,
@@ -773,6 +828,7 @@ export function saveCombo(
   endboardSlots?: ComboEndboardSlots,
   stepComments?: ComboStepComments,
   comboLinks?: ComboStepLinks,
+  cardNotes?: ComboCardNotes,
 ): SavedCombo {
   const combos = getSavedCombos();
   const trimmedDeck = assignedDeck?.name || deck?.trim() || undefined;
@@ -783,6 +839,7 @@ export function saveCombo(
     endboardSlots: normalizeEndboardSlots(endboardSlots),
     stepComments: normalizeStepComments(stepComments),
     comboLinks: normalizeComboLinks(comboLinks),
+    cardNotes: normalizeCardNotes(cardNotes),
     name,
     text,
     createdAt: Date.now(),
@@ -792,7 +849,7 @@ export function saveCombo(
   return combo;
 }
 
-export function updateCombo(id: string, updates: Partial<Pick<SavedCombo, 'deck' | 'name' | 'text' | 'endboardSlots' | 'stepComments' | 'comboLinks' | 'thumbnailCardName' | 'notes'>> & { assignedDeck?: DeckAssignment | null; subsectionId?: string | null }): SavedCombo | null {
+export function updateCombo(id: string, updates: Partial<Pick<SavedCombo, 'deck' | 'name' | 'text' | 'endboardSlots' | 'stepComments' | 'comboLinks' | 'cardNotes' | 'thumbnailCardName' | 'notes' | 'playsAroundCards' | 'requiredCards'>> & { assignedDeck?: DeckAssignment | null; subsectionId?: string | null }): SavedCombo | null {
   const combos = getSavedCombos();
   const comboIndex = combos.findIndex((combo) => combo.id === id);
   if (comboIndex === -1) return null;
@@ -802,8 +859,11 @@ export function updateCombo(id: string, updates: Partial<Pick<SavedCombo, 'deck'
   const endboardSlots = updates.endboardSlots !== undefined ? normalizeEndboardSlots(updates.endboardSlots) : existingCombo.endboardSlots;
   const stepComments = updates.stepComments !== undefined ? normalizeStepComments(updates.stepComments) : existingCombo.stepComments;
   const comboLinks = updates.comboLinks !== undefined ? normalizeComboLinks(updates.comboLinks) : existingCombo.comboLinks;
+  const cardNotes = updates.cardNotes !== undefined ? normalizeCardNotes(updates.cardNotes) : existingCombo.cardNotes;
   const thumbnailCardName = updates.thumbnailCardName !== undefined ? updates.thumbnailCardName.trim() || undefined : existingCombo.thumbnailCardName;
   const notes = updates.notes !== undefined ? updates.notes.trim() || undefined : existingCombo.notes;
+  const playsAroundCards = updates.playsAroundCards !== undefined ? normalizeComboPreviewCardList(updates.playsAroundCards) : existingCombo.playsAroundCards;
+  const requiredCards = updates.requiredCards !== undefined ? normalizeComboPreviewCardList(updates.requiredCards) : existingCombo.requiredCards;
   const subsectionId = updates.subsectionId !== undefined ? updates.subsectionId?.trim() || undefined : existingCombo.subsectionId;
   const updatedCombo: SavedCombo = {
     ...existingCombo,
@@ -813,8 +873,11 @@ export function updateCombo(id: string, updates: Partial<Pick<SavedCombo, 'deck'
     endboardSlots,
     stepComments,
     comboLinks,
+    cardNotes,
     thumbnailCardName,
     notes,
+    playsAroundCards,
+    requiredCards,
     name: updates.name !== undefined ? updates.name : existingCombo.name,
     text: updates.text !== undefined ? updates.text : existingCombo.text,
   };
@@ -882,6 +945,8 @@ export function renameDeck(oldDeck: string, newDeck: string): SavedCombo[] {
   );
 
   localStorage.setItem(STORAGE_KEY, JSON.stringify(combos));
+  const deckNames = getLibraryDeckNames().map((name) => name === oldDeck ? trimmedNewDeck : name);
+  localStorage.setItem(DECK_NAMES_STORAGE_KEY, JSON.stringify(Array.from(new Set(deckNames))));
   const allSubsections = getSavedDeckSubsections();
   if (allSubsections[oldDeck]) {
     allSubsections[trimmedNewDeck] = [

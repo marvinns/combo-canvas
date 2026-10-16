@@ -10,7 +10,7 @@ export interface ComboStepPath {
 }
 
 export interface ComboAction {
-  type: 'summon' | 'ritual' | 'send-gy' | 'activate' | 'target' | 'search' | 'banish' | 'draw' | 'set' | 'tribute' | 'link' | 'xyz' | 'synchro' | 'fusion' | 'pendulum' | 'scale' | 'return' | 'negate' | 'destroy' | 'discard' | 'detach' | 'reveal' | 'continuous' | 'field-spell' | 'generic';
+  type: 'equip' | 'summon' | 'ritual' | 'send-gy' | 'activate' | 'target' | 'search' | 'banish' | 'draw' | 'set' | 'tribute' | 'link' | 'xyz' | 'synchro' | 'fusion' | 'pendulum' | 'scale' | 'return' | 'negate' | 'destroy' | 'discard' | 'detach' | 'reveal' | 'continuous' | 'field-spell' | 'generic';
   label: string;
   labels?: string[];
   chainLink?: number;
@@ -18,6 +18,7 @@ export interface ComboAction {
   phase?: ComboPhase;
   sourceCard: string;
   sourceZone?: CardZone;
+  sourceIsScale?: boolean;
   sourceCards?: string[];
   sourceZones?: Array<CardZone | undefined>;
   scaleSides?: ScaleSide[];
@@ -30,6 +31,8 @@ export interface ComboAction {
   followUpZone?: CardZone;
   followUpCards?: string[];
   followUpZones?: Array<CardZone | undefined>;
+  drawAmount?: number;
+  discardAmount?: number;
   targetOnly?: boolean;
   stepPath?: ComboStepPath;
   raw: string;
@@ -68,6 +71,11 @@ function escapeRegExp(value: string): string {
 
 function extractCardRefs(text: string): string[] {
   return [...text.matchAll(/\[(.+?)\]/g)].map((match) => match[1]);
+}
+
+function extractMaterialRefs(text: string, sourceCard: string): string[] {
+  return [...text.matchAll(/\[([^\]]+)\]|\b(?:itself|it|herself|her|himself|him)\b/gi)]
+    .map((match) => match[1] || sourceCard);
 }
 
 function extractBareCardNames(text: string): string[] {
@@ -293,6 +301,7 @@ function parseMultiTargetStep(trimmed: string): ComboAction | null {
   const tributeMatch = trimmed.match(/^tribute\s+(.+)$/i);
   if (tributeMatch) {
     if (/\bto\s+ritual\s+summon\b/i.test(trimmed)) return null;
+    if (/\bsummon\b.*\bby\s+tributing\b/i.test(trimmed)) return null;
     const targetCards = extractCardRefs(tributeMatch[1]);
     if (targetCards.length > 1) {
       return {
@@ -343,13 +352,13 @@ function parseContinuousSpellTrapStep(trimmed: string): ComboAction | null {
 
   const activateSelfMatch = trimmed.match(
     new RegExp(
-      `^activate\\s+\\[(.+?)\\](?:\\s+(?:from|in)\\s+(?:the\\s+)?(hand|deck|gy|graveyard|extra\\s+deck|banished(?:\\s+zone)?|banishment))?\\s+(?:,?\\s*and\\s+)?put\\s+(?:itself|it|\\[(.+?)\\])\\s+in\\s+the\\s+${zonePattern}[.!]?$`,
+      `^activate\\s+\\[(.+?)\\](?:\\s+(?:from|in)\\s+(?:the\\s+)?(hand|deck|gy|graveyard|extra\\s+deck|banished(?:\\s+zone)?|banishment))?\\s+(?:(?:,?\\s*and|to)\\s+)?put\\s+(?:itself|it|\\[(.+?)\\])(?:\\s+from\\s+(?:the\\s+)?(${ZONE_PATTERN}))?\\s+in\\s+the\\s+${zonePattern}[.!]?$`,
       'i',
     ),
   );
 
   if (activateSelfMatch) {
-    const [, sourceCard, rawSourceZone, explicitTargetCard] = activateSelfMatch;
+    const [, sourceCard, rawSourceZone, explicitTargetCard, rawTargetOriginZone] = activateSelfMatch;
     const targetCard = explicitTargetCard || sourceCard;
 
     return {
@@ -358,6 +367,7 @@ function parseContinuousSpellTrapStep(trimmed: string): ComboAction | null {
       sourceCard,
       sourceZone: rawSourceZone ? normalizeZone(rawSourceZone) : findCardZone(trimmed, sourceCard),
       targetCard,
+      targetOriginZone: normalizeZone(rawTargetOriginZone),
       raw: trimmed,
     };
   }
@@ -599,7 +609,7 @@ function parseActivateClause(clause: string, sourceCard: string, fullText: strin
   const trimmedClause = clause.trim().replace(/[.!]+$/, '');
 
   const addMatch = trimmedClause.match(
-    /^add\s+(.+?)(?:(?:\s+from\s+(?:the\s+)?(deck|gy|graveyard|banished(?:\s+zone)?|banishment)\s+to\s+(?:the\s+|your\s+)?hand)|(?:\s+to\s+(?:the\s+|your\s+)?hand)|(?:\s+from\s+(?:the\s+)?(deck|gy|graveyard|banished(?:\s+zone)?|banishment)))?$/i,
+    /^add\s+(.+?)(?:(?:\s+from\s+(?:the\s+)?(extra\s+deck|deck|gy|graveyard|banished(?:\s+zone)?|banishment)\s+to\s+(?:the\s+|your\s+)?hand)|(?:\s+to\s+(?:the\s+|your\s+)?hand)|(?:\s+from\s+(?:the\s+)?(extra\s+deck|deck|gy|graveyard|banished(?:\s+zone)?|banishment)))?$/i,
   );
   if (addMatch) {
     const [, addedCardsText, rawTargetOriginZoneA, rawTargetOriginZoneB] = addMatch;
@@ -620,7 +630,7 @@ function parseActivateClause(clause: string, sourceCard: string, fullText: strin
   }
 
   const searchMatch = trimmedClause.match(
-    /^search\s+(?:for\s+)?(?:\[([^\]]+)\]|(.+?))(?:\s+from\s+(?:the\s+)?(deck|gy|graveyard|banished(?:\s+zone)?|banishment))?$/i,
+    /^search\s+(?:for\s+)?(?:\[([^\]]+)\]|(.+?))(?:\s+from\s+(?:the\s+)?(extra\s+deck|deck|gy|graveyard|banished(?:\s+zone)?|banishment))?$/i,
   );
   if (searchMatch) {
     const [, bracketedTargetCard, plainTargetCard, rawTargetOriginZone] = searchMatch;
@@ -721,7 +731,7 @@ function parseActivateClause(clause: string, sourceCard: string, fullText: strin
   }
 
   const sendMatch = trimmedClause.match(new RegExp(
-    `^send\\s+(.+?)(?:\\s+from\\s+(?:the\\s+)?(${ZONE_PATTERN}))?\\s+to\\s+the?\\s*(gy|graveyard)$`,
+    `^send\\s+(.+?)(?:\\s+from\\s+(?:the\\s+)?(${ZONE_PATTERN}))?\\s+to\\s+the?\\s*(gy|graveyard|extra\\s+deck)$`,
     'i',
   ));
   if (sendMatch) {
@@ -730,7 +740,7 @@ function parseActivateClause(clause: string, sourceCard: string, fullText: strin
     if (targetCards.length > 0) {
       const targetZone = normalizeZone(rawTargetZone);
       return {
-        label: 'Send to GY',
+        label: targetZone === 'extra-deck' ? 'Send to Extra Deck' : 'Send to GY',
         targetCard: targetCards[0],
         targetCards: targetCards.length > 1 ? targetCards : undefined,
         targetZone,
@@ -758,14 +768,19 @@ function parseActivateClause(clause: string, sourceCard: string, fullText: strin
     };
   }
 
-  const destroyMatch = trimmedClause.match(new RegExp(`^destroy\\s+(?:${SELF_REFERENCE_PATTERN}|\\[([^\\]]+)\\])$`, 'i'));
+  const destroyTargetPattern = `(?:${SELF_REFERENCE_PATTERN}|\\[[^\\]]+\\])`;
+  const destroyMatch = trimmedClause.match(new RegExp(
+    `^destroy\\s+(${destroyTargetPattern}(?:\\s*(?:,\\s*(?:and\\s+)?|and\\s+)${destroyTargetPattern})*)$`, 'i',
+  ));
   if (destroyMatch) {
-    const [, targetCard] = destroyMatch;
-    const resolvedTargetCard = targetCard || sourceCard;
+    const targetCards = [...destroyMatch[1].matchAll(new RegExp(`\\[([^\\]]+)\\]|${SELF_REFERENCE_PATTERN}`, 'gi'))]
+      .map((match) => match[1] || sourceCard);
     return {
       label: 'Destroy',
-      targetCard: resolvedTargetCard,
-      targetZone: findCardZone(fullText, resolvedTargetCard),
+      targetCard: targetCards[0],
+      targetCards: targetCards.length > 1 ? targetCards : undefined,
+      targetZone: findCardZone(fullText, targetCards[0]),
+      targetZones: targetCards.length > 1 ? targetCards.map((card) => findCardZone(fullText, card)) : undefined,
     };
   }
 
@@ -827,14 +842,20 @@ function parseActivateClause(clause: string, sourceCard: string, fullText: strin
   }
 
   const targetMatch = trimmedClause.match(
-    /^target\s+\[([^\]]+)\](?:\s+(?:from|in)\s+(?:the\s+)?(hand|deck|gy|graveyard|extra\s+deck|banished(?:\s+zone)?|banishment))?$/i,
+    /^target\s+(\[[^\]]+\](?:\s*(?:,|and)\s*\[[^\]]+\])*)(?:\s+(?:from|in)\s+(?:the\s+)?(hand|deck|gy|graveyard|extra\s+deck|banished(?:\s+zone)?|banishment))?$/i,
   );
   if (targetMatch) {
-    const [, targetCard, rawTargetZone] = targetMatch;
+    const [, targetsText, rawTargetZone] = targetMatch;
+    const targetCards = extractCardRefs(targetsText);
+    if (targetCards.length === 0) return null;
+    const targetZone = rawTargetZone ? normalizeZone(rawTargetZone) : findCardZone(fullText, targetCards[0]);
+
     return {
       label: 'Target',
-      targetCard,
-      targetZone: rawTargetZone ? normalizeZone(rawTargetZone) : findCardZone(fullText, targetCard),
+      targetCard: targetCards[0],
+      targetCards: targetCards.length > 1 ? targetCards : undefined,
+      targetZone,
+      targetZones: targetCards.length > 1 ? repeatZone(targetZone, targetCards.length) : undefined,
     };
   }
 
@@ -1057,7 +1078,7 @@ function parseSimpleActivateEffectStep(trimmed: string): ComboAction | null {
     const targetCards = extractCardRefs(targetsText);
     if (targetCards.length === 0) return null;
 
-    const sourceCards = materialsText ? extractCardRefs(materialsText) : undefined;
+    const sourceCards = materialsText ? extractMaterialRefs(materialsText, sourceCard) : undefined;
     const label = `${rawSummonType[0].toUpperCase()}${rawSummonType.slice(1).toLowerCase()} Summon`;
     const targetZone = rawTargetZone ? normalizeZone(rawTargetZone) : findCardZone(trimmed, targetCards[0]);
 
@@ -1080,7 +1101,28 @@ function parseSimpleActivateEffectStep(trimmed: string): ComboAction | null {
   return null;
 }
 
+function withScaleSource(action: ComboAction): ComboAction {
+  const destroysSource = action.labels?.[1] === 'Destroy' && action.targetCard === action.sourceCard;
+  return {
+    ...action,
+    sourceIsScale: true,
+    targetZone: destroysSource ? 'extra-deck' : action.targetZone,
+    targetZones: destroysSource && action.targetCards
+      ? action.targetCards.map((card, index) => card === action.sourceCard ? 'extra-deck' : action.targetZones?.[index])
+      : action.targetZones,
+  };
+}
+
 function parseActivateEffectStep(trimmed: string): ComboAction | null {
+  const pendulumEffectMatch = trimmed.match(
+    /^activate\s+\[([^\]]+)\]\s+(?:pendulum(?:['’]s)?\s+effect|as\s+a\s+scale)\s+to\s+(.+)$/i,
+  );
+  if (pendulumEffectMatch) {
+    const [, sourceCard, effectText] = pendulumEffectMatch;
+    const action = parseActivateEffectStep(`Activate [${sourceCard}] to ${effectText}`);
+    return action ? { ...withScaleSource(action), raw: trimmed } : null;
+  }
+
   const activateOnlyMatch = trimmed.match(
     /^activate\s+(?:the\s+effect\s+of\s+)?\[([^\]]+)\][.!]?$/i,
   );
@@ -1184,7 +1226,7 @@ function parseActivateEffectStep(trimmed: string): ComboAction | null {
     const cleanedMaterialsText = materialZoneMatch
       ? materialsText.slice(0, materialZoneMatch.index).trim()
       : materialsText;
-    const sourceCards = extractCardRefs(cleanedMaterialsText);
+    const sourceCards = extractMaterialRefs(cleanedMaterialsText, sourceCard);
 
     if (sourceCards.length > 0) {
       return {
@@ -1327,7 +1369,7 @@ function parseActivateEffectStep(trimmed: string): ComboAction | null {
     ] = activatePrimaryThenSummonMatch;
     const followUpCard = explicitFollowUpCard || sourceCard;
 
-    const primaryEffect = [
+    const primaryEffect: ActivateClauseResult | undefined = [
       returnEffect && (() => {
         const targetCards = extractCardRefs(returnTargetsText);
         const targetZone = normalizeZone(returnZone);
@@ -1367,7 +1409,7 @@ function parseActivateEffectStep(trimmed: string): ComboAction | null {
         targetCards: 'targetCards' in primaryEffect ? primaryEffect.targetCards : undefined,
         targetZone: primaryEffect.targetZone,
         targetZones: 'targetZones' in primaryEffect ? primaryEffect.targetZones : undefined,
-        targetOriginZone: 'targetOriginZone' in primaryEffect ? primaryEffect.targetOriginZone : undefined,
+        targetOriginZone: primaryEffect.targetOriginZone,
         followUpCard,
         followUpZone: rawFollowUpZone ? normalizeZone(rawFollowUpZone) : findCardZone(trimmed, followUpCard),
         raw: trimmed,
@@ -2121,6 +2163,22 @@ function parseSequentialCompoundStep(trimmed: string): ComboAction | null {
     };
   }
 
+  // Both forms display the receiving card first and the equipped card second.
+  const activateEquip = trimmed.match(/^activate\s+(?:the\s+effect\s+of\s+)?(?:\[([^\]]+)\]|([^[\]]+?))\s+to\s+equip\s+(?:\[([^\]]+)\]|([^[\]]+?))[.!]?$/i);
+  const directEquip = trimmed.match(/^equip\s+(?:\[([^\]]+)\]|([^[\]]+?))\s+to\s+(?:\[([^\]]+)\]|([^[\]]+?))[.!]?$/i);
+  const equip = activateEquip || directEquip;
+  if (equip) {
+    const first = (equip[1] || equip[2]).trim();
+    const second = (equip[3] || equip[4]).trim();
+    if (first && second) return {
+      type: 'equip',
+      label: 'Equip',
+      sourceCard: activateEquip ? first : second,
+      targetCard: activateEquip ? second : first,
+      raw: trimmed,
+    };
+  }
+
   const tributeTargetSpecialSummonMatch = trimmed.match(
     /^tribute\s+\[(.+?)\]\s+target\s+\[(.+?)\]\s+in\s+the\s+(gy|graveyard)\s+and\s+special\s+summon\s+(?:it|\[(.+?)\])[.!]?$/i,
   );
@@ -2254,7 +2312,7 @@ function parseSequentialCompoundStep(trimmed: string): ComboAction | null {
   );
 
   const specialIntoActivateAddMatch = trimmed.match(
-    /^(?:special\s+summon|ss)\s+(?:\[([^\]]+)\]|([^,\n.!]+?))(?:\s+from\s+(?:the\s+)?(hand|deck|gy|graveyard|extra\s+deck|banished(?:\s+zone)?|banishment))?\s*(?:,?\s*(?:and\s+)?)?activate\s+(?:it|its\s+effect|the\s+effect\s+of\s+\[([^\]]+)\]|\[([^\]]+)\])\s+to\s+(?:add|search)\s+\[([^\]]+)\]\s+(?:to\s+(?:the\s+|your\s+)?hand|from\s+(deck|gy|graveyard|banished(?:\s+zone)?|banishment)\s+to\s+(?:the\s+|your\s+)?hand)[.!]?$/i,
+    /^(?:special\s+summon|ss)\s+(?:\[([^\]]+)\]|([^,\n.!]+?))(?:\s+from\s+(?:the\s+)?(hand|deck|gy|graveyard|extra\s+deck|banished(?:\s+zone)?|banishment))?\s*(?:,?\s*(?:and\s+)?)?activate\s+(?:it|its\s+effect|the\s+effect\s+of\s+\[([^\]]+)\]|\[([^\]]+)\])\s+to\s+(?:add|search)\s+(\[[^\]]+\](?:\s*(?:,|and)\s*\[[^\]]+\])*)\s+(?:to\s+(?:the\s+|your\s+)?hand|from\s+(?:the\s+)?(deck|gy|graveyard|banished(?:\s+zone)?|banishment)(?:\s+to\s+(?:the\s+|your\s+)?hand)?)[.!]?$/i,
   );
 
   if (specialIntoActivateSendMatch) {
@@ -2281,21 +2339,24 @@ function parseSequentialCompoundStep(trimmed: string): ComboAction | null {
       rawSourceZone,
       effectCardA,
       effectCardB,
-      targetCard,
+      targetsText,
       rawTargetOriginZone,
     ] = specialIntoActivateAddMatch;
     const firstCard = (bracketedFirstCard || bareFirstCard)?.trim();
     const sourceCard = effectCardA || effectCardB || firstCard;
+    const targetCards = extractCardRefs(targetsText);
 
-    if (sourceCard) {
+    if (sourceCard && targetCards.length > 0) {
       return {
         type: 'activate',
         label: 'Special Summon',
         labels: ['Special Summon', 'Activate', 'Add to Hand'],
         sourceCard,
         sourceZone: rawSourceZone ? normalizeZone(rawSourceZone) : findCardZone(trimmed, sourceCard),
-        targetCard,
+        targetCard: targetCards[0],
+        targetCards: targetCards.length > 1 ? targetCards : undefined,
         targetZone: 'hand',
+        targetZones: targetCards.length > 1 ? repeatZone('hand', targetCards.length) : undefined,
         targetOriginZone: normalizeZone(rawTargetOriginZone),
         raw: trimmed,
       };
@@ -2307,12 +2368,12 @@ function parseSequentialCompoundStep(trimmed: string): ComboAction | null {
 
 function parseMaterialSummonStep(trimmed: string): ComboAction | null {
   const summonUsingMatch = trimmed.match(
-    /^(fusion|link|xyz|synchro|ritual)\s+summon\s+\[(.+?)\]\s+using\s+(.+)$/i,
+    /^(fusion|link|xyz|synchro|ritual|tribute)\s+summon\s+\[(.+?)\]\s+using\s+(.+)$/i,
   );
 
   if (summonUsingMatch) {
     const [, rawType, targetCard, materialsText] = summonUsingMatch;
-    const normalizedType = rawType.toLowerCase() as Extract<ComboAction['type'], 'fusion' | 'link' | 'xyz' | 'synchro' | 'ritual'>;
+    const normalizedType = rawType.toLowerCase() as Extract<ComboAction['type'], 'fusion' | 'link' | 'xyz' | 'synchro' | 'ritual' | 'tribute'>;
     const sourceCards = extractCardRefs(materialsText);
 
     if (sourceCards.length > 0) {
@@ -2424,6 +2485,30 @@ function parseRitualSummonStep(trimmed: string): ComboAction | null {
 }
 
 function parseDirectMultiSummonStep(trimmed: string): ComboAction | null {
+  const pendulumCardWithOrigin = String.raw`\[[^\]]+\]\s+from\s+(?:the\s+)?(?:${ZONE_PATTERN})`;
+  const mixedOriginPendulumMatch = trimmed.match(new RegExp(
+    String.raw`^pendulum\s+summon\s+(${pendulumCardWithOrigin}(?:\s*(?:,\s*(?:and\s+)?|and\s+)${pendulumCardWithOrigin})+)[.!]?$`,
+    'i',
+  ));
+  if (mixedOriginPendulumMatch) {
+    const cards = [...mixedOriginPendulumMatch[1].matchAll(new RegExp(
+      String.raw`\[([^\]]+)\]\s+from\s+(?:the\s+)?(${ZONE_PATTERN})`, 'gi',
+    ))];
+    const targetCards = cards.map((match) => match[1]);
+    const targetZones = cards.map((match) => normalizeZone(match[2]));
+    return {
+      type: 'pendulum',
+      label: 'Pendulum Summon',
+      sourceCard: targetCards[0],
+      targetCard: targetCards[0],
+      targetCards,
+      targetZone: targetZones[0],
+      targetZones,
+      targetOnly: true,
+      raw: trimmed,
+    };
+  }
+
   const multiPendulumSummonMatch = trimmed.match(
     /^pendulum\s+summon\s+(\[[^\]]+\](?:\s*(?:,|and)\s*\[[^\]]+\])+)(?:\s+from\s+(?:the\s+)?(hand|extra\s+deck|deck|gy|graveyard|banished(?:\s+zone)?|banishment))?[.!]?$/i,
   );
@@ -2499,6 +2584,57 @@ function parseDirectMultiSummonStep(trimmed: string): ComboAction | null {
     }
   }
 
+  const summonByReturnMatch = trimmed.match(
+    /^special\s+summon\s+\[(.+?)\](?:\s+from\s+(?:the\s+)?(hand|deck|gy|graveyard|extra\s+deck|banished(?:\s+zone)?|banishment))?\s+by\s+returning\s+(.+?)\s+(?:to|into)\s+(?:the\s+)?(hand|deck|extra\s+deck)[.!]?$/i,
+  );
+
+  if (summonByReturnMatch) {
+    const [, targetCard, rawTargetZone, materialsText, rawMaterialZone] = summonByReturnMatch;
+    const sourceCards = extractCardRefs(materialsText);
+
+    if (sourceCards.length > 0) {
+      const materialZone = normalizeZone(rawMaterialZone);
+      return {
+        type: 'summon',
+        label: 'Special Summon',
+        labels: ['Return', 'Special Summon'],
+        sourceCard: targetCard,
+        sourceZone: rawTargetZone ? normalizeZone(rawTargetZone) : findCardZone(trimmed, targetCard),
+        sourceCards,
+        sourceZones: materialZone ? repeatZone(materialZone, sourceCards.length) : sourceCards.map((cardName) => findCardZone(trimmed, cardName)),
+        targetCard,
+        targetZone: rawTargetZone ? normalizeZone(rawTargetZone) : findCardZone(trimmed, targetCard),
+        raw: trimmed,
+      };
+    }
+  }
+
+  const summonByTributeMatch = trimmed.match(
+    /^(?:tribute|normal)?\s*summon\s+\[(.+?)\](?:\s+from\s+(?:the\s+)?(hand|deck|gy|graveyard|extra\s+deck|banished(?:\s+zone)?|banishment))?\s+by\s+tributing\s+(.+?)(?:\s+from\s+(?:the\s+)?(hand|deck|gy|graveyard|extra\s+deck|banished(?:\s+zone)?|banishment))?[.!]?$/i,
+  );
+
+  if (summonByTributeMatch) {
+    const [, targetCard, rawTargetZone, materialsText, rawMaterialZone] = summonByTributeMatch;
+    const sourceCards = extractCardRefs(materialsText);
+
+    if (sourceCards.length > 0) {
+      const materialZone = normalizeZone(rawMaterialZone);
+      const targetZone = rawTargetZone ? normalizeZone(rawTargetZone) : findCardZone(trimmed, targetCard);
+      return {
+        type: 'summon',
+        label: 'Normal Summon',
+        labels: ['Tribute', 'Normal Summon'],
+        sourceCard: targetCard,
+        sourceZone: targetZone,
+        sourceCards,
+        sourceZones: materialZone ? repeatZone(materialZone, sourceCards.length) : sourceCards.map((cardName) => findCardZone(trimmed, cardName)),
+        targetCard,
+        targetZone,
+        raw: trimmed,
+      };
+    }
+  }
+
   const multiSpecialSummonMatch = trimmed.match(
     /^special\s+summon\s+(\[[^\]]+\](?:\s*(?:,|and)\s*\[[^\]]+\])+)(?:\s+from\s+(?:the\s+)?(hand|deck|gy|graveyard|extra\s+deck|banished(?:\s+zone)?|banishment|banished\s+zone))?[.!]?$/i,
   );
@@ -2540,10 +2676,12 @@ function parseScaleActivateStep(trimmed: string): ComboAction | null {
   const activateStep = parseActivateEffectStep(`Activate [${sourceCard}] to ${effectText}`);
   if (!activateStep || !activateStep.labels || activateStep.labels.length < 2) return null;
 
+  const scaleEffect = withScaleSource(activateStep);
   const effectLabels = activateStep.labels.filter((label) => label !== 'Activate');
 
   return {
     type: 'scale',
+    sourceIsScale: true,
     label: 'Scale',
     labels: ['Scale', 'Activate', ...effectLabels],
     sourceCard,
@@ -2553,13 +2691,68 @@ function parseScaleActivateStep(trimmed: string): ComboAction | null {
     scaleSides: explicitSide ? [explicitSide.toLowerCase() as ScaleSide] : undefined,
     targetCard: activateStep.targetCard,
     targetCards: activateStep.targetCards,
-    targetZone: activateStep.targetZone,
-    targetZones: activateStep.targetZones,
+    targetZone: scaleEffect.targetZone,
+    targetZones: scaleEffect.targetZones,
     targetOriginZone: activateStep.targetOriginZone,
     followUpCard: activateStep.followUpCard,
     followUpCards: activateStep.followUpCards,
     followUpZone: activateStep.followUpZone,
     followUpZones: activateStep.followUpZones,
+    raw: trimmed,
+  };
+}
+
+function parseActivateCountEffectStep(trimmed: string): ComboAction | null {
+  const wordAmounts: Record<string, number> = {
+    one: 1, two: 2, three: 3, four: 4, five: 5,
+    six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  };
+  const countPattern = String.raw`(?:\s+([+]?\d+|${Object.keys(wordAmounts).join('|')}))?(?:\s+cards?)?`;
+  const drawPattern = String.raw`(draw|discard)${countPattern}(?:\s*,?\s+(?:and|then)\s+(discard)${countPattern})?[.!]?$`;
+  const summonMatch = trimmed.match(new RegExp(
+    `^(?:special\\s+summon|ss)\\s+\\[([^\\]]+)\\](?:\\s+from\\s+(?:the\\s+)?(${ZONE_PATTERN}))?\\s*(?:,?\\s*(?:and\\s+)?)activate\\s+${ACTIVATED_REFERENCE_PATTERN}\\s+to\\s+${drawPattern}`,
+    'i',
+  ));
+  const match = summonMatch || trimmed.match(new RegExp(
+    `^activate\\s+(?:the\\s+effect\\s+of\\s+)?\\[([^\\]]+)\\](?:\\s+(?:from|in)\\s+(?:the\\s+)?(${ZONE_PATTERN}))?\\s*,?\\s+to\\s+${drawPattern}`,
+    'i',
+  ));
+  if (!match) return null;
+  const [, sourceCard, rawSourceZone, effect, rawAmount, followUpEffect, rawDiscardAmount] = match;
+  const parseAmount = (amount?: string) => amount === undefined ? 1 : wordAmounts[amount.toLowerCase()] ?? Number(amount);
+  const amount = parseAmount(rawAmount);
+  const discardAmount = effect.toLowerCase() === 'discard' ? amount : followUpEffect ? parseAmount(rawDiscardAmount) : undefined;
+  if (!Number.isSafeInteger(amount) || amount < 1 ||
+      (discardAmount !== undefined && (!Number.isSafeInteger(discardAmount) || discardAmount < 1))) return null;
+  if (effect.toLowerCase() === 'discard' && followUpEffect) return null;
+  const drawAmount = effect.toLowerCase() === 'draw' ? amount : undefined;
+
+  return {
+    type: 'activate',
+    label: summonMatch ? 'Special Summon' : 'Activate',
+    labels: [...(summonMatch ? ['Special Summon'] : []), 'Activate', ...(drawAmount !== undefined ? ['Draw'] : []), ...(discardAmount !== undefined ? ['Discard'] : [])],
+    sourceCard,
+    sourceZone: normalizeZone(rawSourceZone),
+    drawAmount,
+    discardAmount,
+    raw: trimmed,
+  };
+}
+
+function parseSpecialSummonActivateSetStep(trimmed: string): ComboAction | null {
+  const match = trimmed.match(new RegExp(
+    `^(?:special\\s+summon|ss)\\s+\\[([^\\]]+)\\](?:\\s+from\\s+(?:the\\s+)?(${ZONE_PATTERN}))?\\s*(?:,?\\s*(?:and\\s+)?)?(?:activate|use)\\s+${ACTIVATED_REFERENCE_PATTERN}\\s+(?:to\\s+)?(set\\s+.+?)[.!]?$`,
+    'i',
+  ));
+  if (!match) return null;
+  const [, sourceCard, rawSourceZone, effectText] = match;
+  const activateStep = parseActivateEffectStep(`Activate [${sourceCard}] to ${effectText}`);
+  if (!activateStep?.labels?.includes('Set')) return null;
+  return {
+    ...activateStep,
+    label: 'Special Summon',
+    labels: ['Special Summon', ...activateStep.labels],
+    sourceZone: normalizeZone(rawSourceZone),
     raw: trimmed,
   };
 }
@@ -2588,6 +2781,33 @@ function parseNormalSummonActivateStep(trimmed: string): ComboAction | null {
 
 export function parseComboStep(line: string): ComboAction {
   const trimmed = line.trim();
+  // Both forms display the receiving card first and the equipped card second.
+  const activateEquip = trimmed.match(/^activate\s+(?:the\s+effect\s+of\s+)?(?:\[([^\]]+)\]|([^[\]]+?))\s+to\s+equip\s+(?:\[([^\]]+)\]|([^[\]]+?))[.!]?$/i);
+  const directEquip = trimmed.match(/^equip\s+(?:\[([^\]]+)\]|([^[\]]+?))\s+to\s+(?:\[([^\]]+)\]|([^[\]]+?))[.!]?$/i);
+  const equip = activateEquip || directEquip;
+  if (equip) {
+    const first = (equip[1] || equip[2]).trim();
+    const second = (equip[3] || equip[4]).trim();
+    if (first && second) return {
+      type: 'equip',
+      label: 'Equip',
+      sourceCard: activateEquip ? first : second,
+      targetCard: activateEquip ? second : first,
+      raw: trimmed,
+    };
+  }
+
+  const tributeMaterialsMatch = trimmed.match(
+    /^tribute\s+(\[[^\]]+\](?:\s*(?:,|and)\s*\[[^\]]+\])*)\s+to\s+summon\s+\[([^\]]+)\][.!]?$/i,
+  );
+  if (/^tribute\s+summon\b/i.test(trimmed) || tributeMaterialsMatch) {
+    const materialText = tributeMaterialsMatch
+      ? `Tribute summon [${tributeMaterialsMatch[2]}] using ${tributeMaterialsMatch[1]}`
+      : trimmed;
+    const tributeSummon = parseMaterialSummonStep(materialText);
+    if (tributeSummon) return { ...tributeSummon, raw: trimmed };
+  }
+
   const tributeTargetSpecialSummonMatch = trimmed.match(
     /^tribute\s+\[(.+?)\]\s+target\s+\[(.+?)\]\s+in\s+the\s+(gy|graveyard)\s+and\s+special\s+summon\s+(?:it|\[(.+?)\])[.!]?$/i,
   );
@@ -2630,8 +2850,12 @@ export function parseComboStep(line: string): ComboAction {
   if (fieldSpellStep) return fieldSpellStep;
   const multiTargetStep = parseMultiTargetStep(trimmed);
   if (multiTargetStep) return multiTargetStep;
+  const specialSummonActivateSetStep = parseSpecialSummonActivateSetStep(trimmed);
+  if (specialSummonActivateSetStep) return specialSummonActivateSetStep;
   const normalSummonActivateStep = parseNormalSummonActivateStep(trimmed);
   if (normalSummonActivateStep) return normalSummonActivateStep;
+  const activateCountEffectStep = parseActivateCountEffectStep(trimmed);
+  if (activateCountEffectStep) return activateCountEffectStep;
   const sequentialCompoundStep = parseSequentialCompoundStep(trimmed);
   if (sequentialCompoundStep) return sequentialCompoundStep;
   const scaleActivateStep = parseScaleActivateStep(trimmed);
@@ -2909,6 +3133,19 @@ export function getComboBranchGroups(actions: ComboAction[]): ComboBranchGroup[]
           .map(([route, actionIndices]) => ({ route, actionIndices })),
       };
     });
+}
+
+// Resolve against current branches so removed routes cannot keep an old board active.
+export function getEndboardRoute(
+  branchGroups: ComboBranchGroup[],
+  selectedRoutes: Partial<Record<number, number>> = {},
+): { baseStep: number; route: number } | undefined {
+  const branch = branchGroups[branchGroups.length - 1];
+  if (!branch) return undefined;
+  const selected = selectedRoutes[branch.baseStep];
+  const route = branch.routes.find((candidate) => candidate.route === selected)?.route
+    ?? branch.routes[0]?.route;
+  return route === undefined ? undefined : { baseStep: branch.baseStep, route };
 }
 
 export function getVisibleComboActionIndices(
