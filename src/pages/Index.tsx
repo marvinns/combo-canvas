@@ -928,7 +928,6 @@ export default function Index() {
   const previousHighlightedStepRef = useRef<number | null>(null);
   const pendingEditorHighlightRef = useRef(false);
   const touchStartXRef = useRef<number | null>(null);
-  const fullModeContainerRef = useRef<HTMLDivElement>(null);
   const comboTextRef = useRef(comboText);
   const endboardSlotsRef = useRef(endboardSlots);
   const stepCommentsRef = useRef(stepComments);
@@ -1403,26 +1402,10 @@ export default function Index() {
   useEffect(() => {
     if (!isBreakdownFullMode || !isMobile) return;
 
-    const fullModeElement = fullModeContainerRef.current;
     const orientation = screen.orientation as ScreenOrientation & { lock?: (orientation: string) => Promise<void> };
-
-    const enterFullscreen = async () => {
-      try {
-        if (fullModeElement && document.fullscreenElement !== fullModeElement) {
-          await fullModeElement.requestFullscreen();
-        }
-      } catch {
-        // Ignore fullscreen failures on browsers that do not support it.
-      }
-
-      try {
-        await orientation?.lock?.('landscape');
-      } catch {
-        // Ignore orientation lock failures on unsupported mobile browsers.
-      }
-    };
-
-    void enterFullscreen();
+    void orientation?.lock?.('landscape').catch(() => {
+      // Orientation locking is optional and unsupported on some mobile browsers.
+    });
 
     return () => {
       try {
@@ -1431,13 +1414,17 @@ export default function Index() {
         // Ignore orientation unlock failures.
       }
 
-      if (document.fullscreenElement) {
-        void document.exitFullscreen().catch(() => {
-          // Ignore fullscreen exit failures.
-        });
-      }
     };
   }, [isBreakdownFullMode, isMobile]);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement) setIsBreakdownFullMode(false);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
 
   const handleVisualize = () => {
     const parsed = parseCombo(comboText);
@@ -1604,11 +1591,20 @@ export default function Index() {
       editor.blur();
     }
     clearBrowserSelection();
+    const fullscreenRequest = document.documentElement.requestFullscreen?.();
+    void fullscreenRequest?.catch(() => {
+      // Keep the in-app full-screen view available when the browser denies fullscreen.
+    });
     setIsBreakdownFullMode(true);
   };
 
   const closeBreakdownFullMode = () => {
     setIsBreakdownFullMode(false);
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => {
+        // The in-app full-screen view still closes if browser fullscreen is unavailable.
+      });
+    }
   };
 
   const openEndboardMode = () => {
@@ -2010,8 +2006,8 @@ export default function Index() {
           key={`${activeStepIndex}-${mode}`}
           className={
             mode === 'full'
-              ? 'h-[78dvh] w-[92vw] max-w-[1400px] overflow-hidden'
-              : 'h-[500px] w-full overflow-hidden'
+              ? 'h-[100dvh] w-[100vw] max-w-none overflow-hidden'
+              : 'h-[min(62dvh,500px)] min-h-[300px] w-full overflow-hidden'
           }
           action={activeStep}
           stepNumber={activeVisibleStepPosition + 1}
@@ -2658,10 +2654,10 @@ export default function Index() {
         </DialogContent>
       </Dialog>
       {isBreakdownFullMode && activeStep && (
-        <div ref={fullModeContainerRef} className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm">
-          <div className="flex h-full w-full items-center justify-center p-3">
+        <div className="fixed inset-0 z-[100] h-[100dvh] w-screen overflow-auto bg-black/95 pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)]">
+          <div className="flex min-h-full w-full items-center justify-center p-0">
             <div
-              className="relative flex max-h-[94dvh] max-w-[96vw] items-center justify-center"
+              className="relative flex h-full min-h-[100dvh] w-full max-w-full items-center justify-center overflow-auto"
               onTouchStart={handleBreakdownTouchStart}
               onTouchEnd={handleBreakdownTouchEnd}
             >
@@ -2669,7 +2665,7 @@ export default function Index() {
                 type="button"
                 onClick={goToPreviousStep}
                 disabled={activeVisibleStepPosition === 0}
-                className="absolute left-3 top-1/2 z-20 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full border border-white/10 bg-black/70 text-white shadow-lg backdrop-blur transition-all hover:bg-black/90 disabled:cursor-not-allowed disabled:opacity-35"
+                className="absolute left-[max(0.5rem,env(safe-area-inset-left))] top-1/2 z-20 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full border border-white/10 bg-black/70 text-white shadow-lg backdrop-blur transition-all hover:bg-black/90 disabled:cursor-not-allowed disabled:opacity-35"
                 aria-label="Previous step"
               >
                 <ChevronLeft className="h-5 w-5" />
@@ -2678,7 +2674,7 @@ export default function Index() {
                 type="button"
                 onClick={goToNextStep}
                 disabled={activeVisibleStepPosition === visibleActionIndices.length - 1}
-                className="absolute right-3 top-1/2 z-20 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full border border-white/10 bg-black/70 text-white shadow-lg backdrop-blur transition-all hover:bg-black/90 disabled:cursor-not-allowed disabled:opacity-35"
+                className="absolute right-[max(0.5rem,env(safe-area-inset-right))] top-1/2 z-20 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full border border-white/10 bg-black/70 text-white shadow-lg backdrop-blur transition-all hover:bg-black/90 disabled:cursor-not-allowed disabled:opacity-35"
                 aria-label="Next step"
               >
                 <ChevronRight className="h-5 w-5" />
@@ -2686,20 +2682,20 @@ export default function Index() {
               <button
                 type="button"
                 onClick={closeBreakdownFullMode}
-                className="absolute right-3 top-3 z-20 flex h-10 min-w-10 items-center justify-center gap-1 rounded-full border border-white/10 bg-black/70 px-3 text-white shadow-lg backdrop-blur transition-all hover:bg-black/90"
+                className="absolute right-[max(0.75rem,env(safe-area-inset-right))] top-[max(0.75rem,env(safe-area-inset-top))] z-30 flex h-11 min-w-11 items-center justify-center gap-1 rounded-full border border-white/10 bg-black/80 px-3 text-white shadow-lg backdrop-blur transition-all hover:bg-black/90"
                 aria-label="Close full mode"
               >
                 <Minimize2 className="h-4 w-4" />
                 <X className="h-4 w-4" />
               </button>
-              <div className="absolute left-3 top-3 z-20 rounded-full border border-white/10 bg-black/70 px-3 py-1 text-xs font-display font-semibold text-white shadow-lg backdrop-blur">
+              <div className="absolute left-[max(0.75rem,env(safe-area-inset-left))] top-[max(0.75rem,env(safe-area-inset-top))] z-20 rounded-full border border-white/10 bg-black/70 px-3 py-1 text-xs font-display font-semibold text-white shadow-lg backdrop-blur">
                 Step {activeStep.stepPath?.label ?? activeVisibleStepPosition + 1} / {finalStepNumber}
               </div>
-              <div className="absolute bottom-3 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded-full border border-white/10 bg-black/70 px-3 py-1 text-[10px] font-display font-semibold uppercase tracking-[0.08em] text-white/80 shadow-lg backdrop-blur sm:tracking-[0.18em]">
+              <div className="absolute bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded-full border border-white/10 bg-black/70 px-3 py-1 text-[10px] font-display font-semibold uppercase tracking-[0.08em] text-white/80 shadow-lg backdrop-blur sm:tracking-[0.18em]">
                 Use Left/Right arrows
               </div>
               <div
-                className="flex max-h-[94dvh] w-fit max-w-[100vw] items-center justify-center px-12 py-12 sm:max-w-[96vw] sm:py-10"
+                className="flex min-h-[100dvh] w-full max-w-full items-center justify-center px-14 py-14 sm:px-16"
               >
                 {renderBreakdownVisual('full')}
               </div>
