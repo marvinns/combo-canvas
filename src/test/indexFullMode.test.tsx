@@ -1,3 +1,4 @@
+import { MemoryRouter } from 'react-router-dom';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -34,20 +35,28 @@ describe('Index full mode desktop breakdown', () => {
       createdAt: 1,
     }]));
 
-    render(<Index />);
+    render(<MemoryRouter><Index /></MemoryRouter>);
 
-    const libraryToggle = screen.getByRole('button', { name: /Combo Library/ });
+    const libraryToggle = screen.getByRole('button', { name: 'Expand combo library' });
     fireEvent.click(libraryToggle);
-    fireEvent.change(screen.getByDisplayValue('All Decks'), { target: { value: 'Heroes' } });
-    fireEvent.click(libraryToggle);
-    fireEvent.click(libraryToggle);
+    fireEvent.click(screen.getByRole('button', { name: 'Select deck Heroes' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse combo library' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Expand combo library' }));
 
-    expect(screen.getByDisplayValue('Heroes')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select deck Heroes' })).toHaveClass('border-primary/45');
     localStorage.clear();
   }, 15000);
 
+  it('keeps editor overlays synchronized while scrolling without page state updates', () => {
+    const { container } = render(<MemoryRouter><Index /></MemoryRouter>);
+    const editor = container.querySelector('[contenteditable="true"]') as HTMLDivElement;
+    editor.scrollTop = 120;
+    fireEvent.scroll(editor);
+    expect(editor.parentElement?.style.getPropertyValue('--editor-scroll-offset')).toBe('-120px');
+  });
+
   it('opens full mode on desktop and navigates steps with keyboard arrows', () => {
-    render(<Index />);
+    render(<MemoryRouter><Index /></MemoryRouter>);
 
     fireEvent.click(screen.getByText('Load Example'));
     fireEvent.click(screen.getByText('Full Mode'));
@@ -60,10 +69,12 @@ describe('Index full mode desktop breakdown', () => {
 
     fireEvent.keyDown(window, { key: 'ArrowLeft' });
     expect(screen.getAllByText('Step 1 / 3').length).toBeGreaterThan(0);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByText('Use Left/Right arrows')).not.toBeInTheDocument();
   }, 15000);
 
   it('opens the endboard builder and fills a slot from known combo cards', () => {
-    render(<Index />);
+    render(<MemoryRouter><Index /></MemoryRouter>);
 
     fireEvent.click(screen.getByText('Load Example'));
     fireEvent.click(screen.getByRole('button', { name: 'Show endboard builder' }));
@@ -75,7 +86,7 @@ describe('Index full mode desktop breakdown', () => {
   }, 15000);
 
   it('optionally displays and retains cards in hand on the endboard', () => {
-    render(<Index />);
+    render(<MemoryRouter><Index /></MemoryRouter>);
 
     fireEvent.click(screen.getByText('Load Example'));
     fireEvent.click(screen.getByRole('button', { name: 'Show endboard builder' }));
@@ -95,7 +106,7 @@ describe('Index full mode desktop breakdown', () => {
   }, 15000);
 
   it('opens a full art preview when double clicking an endboard slot card', () => {
-    render(<Index />);
+    render(<MemoryRouter><Index /></MemoryRouter>);
 
     fireEvent.click(screen.getByText('Load Example'));
     fireEvent.click(screen.getByRole('button', { name: 'Show endboard builder' }));
@@ -108,8 +119,26 @@ describe('Index full mode desktop breakdown', () => {
     expect(screen.getByText('Full screen preview for Diabellze the White Witch')).toBeInTheDocument();
   }, 15000);
 
+  it('edits and retains card info from the actual endboard full art preview', () => {
+    render(<MemoryRouter><Index /></MemoryRouter>);
+    fireEvent.click(screen.getByText('Load Example'));
+    fireEvent.click(screen.getByRole('button', { name: 'Show endboard builder' }));
+    fireEvent.click(screen.getAllByLabelText('Add card to endboard slot')[0]);
+    fireEvent.click(screen.getByText('Diabellze the White Witch'));
+    const previewLabel = 'Add another card to slot containing 1 card; double click Diabellze the White Witch for full art view';
+    fireEvent.doubleClick(screen.getByLabelText(previewLabel));
+    fireEvent.click(screen.getByRole('button', { name: 'Show card info' }));
+    fireEvent.change(screen.getByLabelText('Additional information for Diabellze the White Witch'), {
+      target: { value: 'Keep this effect available.' },
+    });
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.doubleClick(screen.getByLabelText(previewLabel));
+    fireEvent.click(screen.getByRole('button', { name: 'Show card info' }));
+    expect(screen.getByLabelText('Additional information for Diabellze the White Witch')).toHaveValue('Keep this effect available.');
+  }, 15000);
+
   it('shows related cards from an endboard full art preview', () => {
-    render(<Index />);
+    render(<MemoryRouter><Index /></MemoryRouter>);
 
     fireEvent.click(screen.getByText('Load Example'));
     fireEvent.click(screen.getByRole('button', { name: 'Show endboard builder' }));
@@ -123,7 +152,7 @@ describe('Index full mode desktop breakdown', () => {
   }, 15000);
 
   it('adds multiple cards to one endboard slot and removes the top card first', async () => {
-    render(<Index />);
+    render(<MemoryRouter><Index /></MemoryRouter>);
 
     fireEvent.click(screen.getByText('Load Example'));
     fireEvent.click(screen.getByRole('button', { name: 'Show endboard builder' }));
@@ -151,7 +180,7 @@ describe('Index full mode desktop breakdown', () => {
   }, 15000);
 
   it('edits cards and their order from the endboard stack browser', async () => {
-    render(<Index />);
+    render(<MemoryRouter><Index /></MemoryRouter>);
 
     fireEvent.click(screen.getByText('Load Example'));
     fireEvent.click(screen.getByRole('button', { name: 'Show endboard builder' }));
@@ -178,7 +207,7 @@ describe('Index full mode desktop breakdown', () => {
   }, 15000);
 
   it('replaces the full bracket contents when applying a card suggestion inside an existing name', async () => {
-    const { container } = render(<Index />);
+    const { container } = render(<MemoryRouter><Index /></MemoryRouter>);
     const editor = container.querySelector('[contenteditable="true"]') as HTMLDivElement;
 
     editor.innerHTML = 'Activate [Diazzzz]<br>Special Summon [Diabellze the White Witch]';
@@ -205,7 +234,7 @@ describe('Index full mode desktop breakdown', () => {
   }, 15000);
 
   it('shows subtle inline combo autocomplete and accepts it with the right arrow', async () => {
-    const { container } = render(<Index />);
+    const { container } = render(<MemoryRouter><Index /></MemoryRouter>);
     const editor = container.querySelector('[contenteditable="true"]') as HTMLDivElement;
 
     setEditorTextAndCaret(editor, 'Sy');
@@ -224,7 +253,7 @@ describe('Index full mode desktop breakdown', () => {
   }, 15000);
 
   it('continues route substep numbering when pressing enter at the end of a route line', async () => {
-    const { container } = render(<Index />);
+    const { container } = render(<MemoryRouter><Index /></MemoryRouter>);
     const editor = container.querySelector('[contenteditable="true"]') as HTMLDivElement;
 
     setEditorTextAndCaret(editor, '10.1a Activate [Fallen of Albaz]');
@@ -259,8 +288,8 @@ describe('Index full mode desktop breakdown', () => {
       },
     ]));
 
-    const { container } = render(<Index />);
-    fireEvent.click(screen.getByRole('button', { name: /Combo Library/ }));
+    const { container } = render(<MemoryRouter><Index /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Expand combo library' }));
     fireEvent.click(screen.getByText('Anchor Combo'));
 
     const editor = container.querySelector('[contenteditable="true"]') as HTMLDivElement;

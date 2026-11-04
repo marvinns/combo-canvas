@@ -3,14 +3,16 @@ import { cn } from '@/lib/utils';
 import { motion, useAnimation } from 'motion/react';
 import { GripVertical, Link2, LocateFixed, Trash2 } from 'lucide-react';
 import type { ComboAction, ScaleSide } from '@/lib/comboParser';
-import { CardDisplay, CardDisplaySizeProvider, SourceZoneBadge, type CardDisplaySize } from './CardDisplay';
+import { CardDisplay, CardDisplaySizeProvider, ExtraDeckZoneIcon, SourceZoneBadge, type CardDisplaySize, type CardNoteMap, type CardStatus } from './CardDisplay';
 import { ActionIcon, ActionArrow, ChainLinkIcon, CHAIN_LINK_BG_CLASS, CHAIN_LINK_BORDER_CLASS, CHAIN_LINK_TEXT_CLASS, EFFECT_STYLES, PHASE_BG_CLASS, PHASE_BORDER_CLASS, PHASE_TEXT_CLASS, PhaseIcon, ScaleLeftOverlayIcon, ScaleRightOverlayIcon } from './ActionIcon';
 
 const LABEL_TYPES: Record<string, ComboAction['type']> = {
+  Equip: 'equip',
   'Continuous Spell & Trap': 'continuous',
   'Field Spell Zone': 'field-spell',
   'Special Summon': 'summon',
   'Ritual Summon': 'ritual',
+  'Tribute Summon': 'tribute',
   'Normal Summon': 'summon',
   'Summon': 'summon',
   'Send to GY': 'send-gy',
@@ -42,7 +44,7 @@ const CASCADE_SUMMON_TYPES = new Set<ComboAction['type']>(['fusion', 'ritual', '
 const TARGET_CASCADE_TYPES = new Set<ComboAction['type']>(['negate', 'destroy', 'tribute', 'banish', 'send-gy', 'return']);
 const NORMAL_SUMMON_COLOR = { text: 'text-amber-700', bg: 'bg-amber-700/15', border: 'border-amber-700/40' };
 const TARGET_ONLY_STATUS_EFFECTS = new Set<ComboAction['type']>(['send-gy', 'banish', 'negate', 'destroy', 'return', 'tribute']);
-const HIDDEN_STEP_LABELS = new Set(['Continuous Spell & Trap', 'Field Spell Zone']);
+const HIDDEN_STEP_LABELS = new Set(['Field Spell Zone']);
 const COMMENT_TEXT_CLASS = 'text-emerald-300';
 const COMMENT_BG_CLASS = 'bg-emerald-300/10';
 const COMMENT_BORDER_CLASS = 'border-emerald-300/30';
@@ -51,6 +53,7 @@ const LINK_BG_CLASS = 'bg-cyan-300/10';
 const LINK_BORDER_CLASS = 'border-cyan-300/30';
 const MIN_LINK_WIDTH = 150;
 const MAX_LINK_WIDTH = 420;
+const EMPTY_STEP_LINKS: StepLink[] = [];
 
 type StepComment = {
   text: string;
@@ -89,6 +92,9 @@ type ComboStepVisualProps = {
   onLinkPositionChange?: (linkId: string, x: number, y: number) => void;
   onLinkWidthChange?: (linkId: string, width: number) => void;
   onOpenLink?: (link: StepLink) => void;
+  cardNoteIdPrefix?: string;
+  cardNotes?: CardNoteMap;
+  onCardNoteChange?: (cardInstanceId: string, text: string) => void;
 };
 
 function getCustomCardTag(raw: string, cardName: string): string | undefined {
@@ -108,6 +114,15 @@ function getCustomStepTags(raw: string): string[] {
     seen.add(key);
     return [tag];
   });
+}
+
+function SummonConnector({ zone, style }: { zone?: ComboAction['targetZone']; style?: React.CSSProperties }) {
+  return (
+    <div className={zone ? 'flex flex-col items-center gap-2 self-center' : 'flex items-center self-start'} style={zone ? { ...style, height: undefined } : style}>
+      <ActionArrow type="summon" />
+      {zone && <SourceZoneBadge zone={zone} />}
+    </div>
+  );
 }
 
 function MaterialPlusIcon({ className }: { className?: string }) {
@@ -162,12 +177,15 @@ export function ComboStepVisual({
   onCommentDelete,
   onCommentPositionChange,
   onCommentWidthChange,
-  links = [],
+  links = EMPTY_STEP_LINKS,
   onLinkLabelChange,
   onLinkDelete,
   onLinkPositionChange,
   onLinkWidthChange,
   onOpenLink,
+  cardNoteIdPrefix,
+  cardNotes = {},
+  onCardNoteChange,
 }: ComboStepVisualProps) {
   const [activeCascadeIndex, setActiveCascadeIndex] = useState<number | null>(null);
   const [activeTargetCascadeIndex, setActiveTargetCascadeIndex] = useState<number | null>(null);
@@ -239,6 +257,7 @@ export function ComboStepVisual({
   const cardEffects = effectTypes.length > 0 ? effectTypes : [action.type];
   const isSpecialSummonStep = labelsToRender.includes('Special Summon');
   const isNormalSummonStep = labelsToRender.includes('Normal Summon');
+  const isSpecialSummonThenSetStep = rawLabels[0] === 'Special Summon' && rawLabels.includes('Activate') && rawLabels.includes('Set');
   const isNormalIntoSpecialStep = isNormalSummonStep && isSpecialSummonStep;
   const isSelfSpecialSummonSetupStep =
     labelsToRender.includes('Activate') &&
@@ -433,7 +452,7 @@ export function ComboStepVisual({
     Boolean(action.targetCard);
   const isLeadingEffectMaterialSummonStep =
     !labelsToRender.includes('Activate') &&
-    labelsToRender.includes('Special Summon') &&
+    (labelsToRender.includes('Special Summon') || labelsToRender.includes('Normal Summon') || labelsToRender.includes('Summon')) &&
     sourceCards.length > 0 &&
     Boolean(action.targetCard) &&
     cardEffects.some((type) => type !== 'summon');
@@ -456,7 +475,7 @@ export function ComboStepVisual({
     !isActivateSelfSetStep;
   const usesTargetEffect = cardEffects.includes('target') || action.type === 'target';
   const isCompoundActivateStep = cardEffects.includes('activate') && cardEffects.length > 1 && !action.targetOnly;
-  const isMultiMaterialSummon = CASCADE_SUMMON_TYPES.has(action.type) && sourceCards.length > 1 && Boolean(action.targetCard);
+  const isMultiMaterialSummon = ((CASCADE_SUMMON_TYPES.has(action.type) && sourceCards.length > 1) || action.label === 'Tribute Summon') && Boolean(action.targetCard);
   const shouldUseCascadeStack =
     (isMultiMaterialSummon || isActivateFusionStep || isLeadingEffectMaterialSummonStep) &&
     sourceCards.length > 2;
@@ -488,6 +507,7 @@ export function ComboStepVisual({
     targetCards.length > 0;
   const sourceEffects = cardEffects.filter((type) => {
     if (
+      type === 'equip' ||
       type === 'activate' ||
       type === 'continuous' ||
       type === 'field-spell' ||
@@ -504,15 +524,17 @@ export function ComboStepVisual({
   });
   const sourceHasActivation = cardEffects.includes('activate');
   const statusEffects = cardEffects.filter((type) => STATUS_EFFECTS.has(type) || type === 'continuous' || type === 'field-spell');
-  const summonStatus = isSpecialSummonStep ? 'special-summon' : isNormalSummonStep ? 'normal-summon' : null;
+  const summonStatus: CardStatus | null = isSpecialSummonStep ? 'special-summon' : isNormalSummonStep ? 'normal-summon' : null;
   const nonSummonStatusEffects = statusEffects.filter((type) => type !== 'summon');
   const selfSummonTransferredStatuses = isSelfSpecialSummonSetupStep
     ? nonSummonStatusEffects.filter((type) => type === 'banish')
     : [];
-  const sourceStatuses = action.targetCard
+  const sourceStatuses: CardStatus[] = action.targetCard
     ? ([
-        ...(isNormalSummonStep
-          ? ['normal-summon' as const]
+        ...(isSpecialSummonThenSetStep
+          ? ['special-summon' as const]
+          : isNormalSummonStep
+          ? isLeadingEffectMaterialSummonStep ? [] : ['normal-summon' as const]
           : isSelfFollowUpSpecialSummonStep
             ? []
           : isTributeTargetSpecialSummonStep
@@ -542,16 +564,23 @@ export function ComboStepVisual({
         ...(summonStatus ? [summonStatus] : []),
         ...nonSummonStatusEffects,
       ]);
-  const targetStatuses = action.targetCard
+  const targetStatuses: CardStatus[] = action.targetCard
     ? ([
-        ...(isNormalIntoSpecialStep || isSelfSpecialSummonSetupStep
+        ...(isSpecialSummonThenSetStep
+          ? []
+          : isNormalIntoSpecialStep || isSelfSpecialSummonSetupStep
           ? ['special-summon' as const]
+          : isNormalSummonStep && isLeadingEffectMaterialSummonStep
+            ? ['normal-summon' as const]
           : (isSpecialSummonSendGyStep && !isMaterialSendGySummonStep) || isSpecialIntoSendGyStep || isNormalIntoSendGyStep || isNormalSummonAddToHandStep || isSpecialSummonAddToHandStep || isTargetIntoFollowUpSpecialSummonStep || isGenericPrimaryIntoFollowUpSpecialSummonStep
             ? []
           : summonStatus && !isNormalSummonStep
               ? [summonStatus]
               : []),
         ...selfSummonTransferredStatuses,
+        ...(!action.followUpCard
+          ? cardEffects.filter((type) => type === 'return' || type === 'destroy' || type === 'tribute')
+          : []),
         ...(isSelfSpecialSummonSetupStep
           || isNormalSummonAddToHandStep
           || isSpecialSummonAddToHandStep
@@ -566,7 +595,7 @@ export function ComboStepVisual({
           )),
       ])
     : [];
-  const simpleTwoCardSourceStatuses = isNormalSummonStep
+  const simpleTwoCardSourceStatuses: CardStatus[] = isNormalSummonStep
     ? ['normal-summon' as const, ...sourceStatuses.filter((status) => status !== 'normal-summon')]
     : sourceStatuses;
   const displayedTargetZone =
@@ -586,11 +615,16 @@ export function ComboStepVisual({
   const arrowEffectType = isCompoundActivateStep
     ? secondaryEffectTypes[secondaryEffectTypes.length - 1] || action.type
     : cardEffects[cardEffects.length - 1] || action.type;
+  const summonOriginZones = arrowEffectType === 'summon' && isSpecialSummonStep
+    ? [...new Set(targetZones.filter((zone) => zone !== undefined))]
+    : [];
   const centerStatuses = action.targetCard
-    ? statusEffects.filter((type) => type === 'send-gy')
+    ? statusEffects.filter((type) => type === 'send-gy' || type === 'continuous')
     : [];
   const materialConnectorColor = (EFFECT_STYLES[action.type] || DEFAULT_ACTION_COLOR).text;
-  const centerIcons = isCompoundActivateStep
+  const centerIcons: ComboAction['type'][] = action.type === 'equip'
+    ? ['equip' as const]
+    : isCompoundActivateStep
     ? secondaryEffectTypes.filter(
         (type) =>
           type !== 'target' &&
@@ -607,17 +641,42 @@ export function ComboStepVisual({
   const commentButtonRef = useRef<HTMLButtonElement>(null);
   const commentEditorRef = useRef<HTMLDivElement>(null);
   const commentPreviewRef = useRef<HTMLDivElement>(null);
+  const cardDisplayOrdinalRef = useRef(0);
+  const actionRawRef = useRef(action.raw);
+  const sourceIsScaleRef = useRef(action.sourceIsScale);
+  const cardNoteIdPrefixRef = useRef(cardNoteIdPrefix);
+  const cardNotesRef = useRef(cardNotes);
+  const onCardNoteChangeRef = useRef(onCardNoteChange);
+  actionRawRef.current = action.raw;
+  sourceIsScaleRef.current = action.sourceIsScale;
+  cardNoteIdPrefixRef.current = cardNoteIdPrefix;
+  cardNotesRef.current = cardNotes;
+  onCardNoteChangeRef.current = onCardNoteChange;
   const targetMarker = (
     <div className={`rounded-full border bg-secondary/90 p-1.5 ${EFFECT_STYLES.target.border}`}>
       <LocateFixed className={`h-4 w-4 ${EFFECT_STYLES.target.text}`} strokeWidth={2.4} />
     </div>
   );
-  const TaggedCardDisplay = useCallback((props: React.ComponentProps<typeof CardDisplay>) => (
-    <CardDisplay
-      {...props}
-      customTag={props.customTag ?? getCustomCardTag(action.raw, props.name)}
-    />
-  ), [action.raw]);
+  cardDisplayOrdinalRef.current = 0;
+  const TaggedCardDisplay = useCallback((props: React.ComponentProps<typeof CardDisplay>) => {
+    const prefix = cardNoteIdPrefixRef.current;
+    const cardInstanceId = prefix ? `${prefix}:card:${cardDisplayOrdinalRef.current}` : undefined;
+    cardDisplayOrdinalRef.current += 1;
+
+    return (
+      <CardDisplay
+        {...props}
+        isScale={props.isScale || (props.isActivated && sourceIsScaleRef.current)}
+        customTag={props.customTag ?? getCustomCardTag(actionRawRef.current, props.name)}
+        cardInfo={cardInstanceId ? cardNotesRef.current[cardInstanceId] ?? '' : props.cardInfo}
+        onCardInfoChange={
+          cardInstanceId
+            ? (text) => onCardNoteChangeRef.current?.(cardInstanceId, text)
+            : props.onCardInfoChange
+        }
+      />
+    );
+  }, []);
   const scaleTargetCardsBySide: Partial<Record<ScaleSide, { name: string; zone?: ComboAction['targetZone'] }>> = isActivateScaleStep
     ? targetCards.reduce<Partial<Record<ScaleSide, { name: string; zone?: ComboAction['targetZone'] }>>>((acc, cardName, index) => {
         const side = scaleSides[index];
@@ -634,6 +693,10 @@ export function ComboStepVisual({
   const activeCascadeZone = shouldUseCascadeStack ? sourceZones[topCascadeIndex] : undefined;
   const topTargetCascadeIndex = activeTargetCascadeIndex ?? targetCards.length - 1;
   const activeTargetZone = shouldUseTargetCascadeStack ? targetDisplayZones[topTargetCascadeIndex] : undefined;
+  // Send-to-GY target zones are destinations, not origins for a 'From' badge.
+  const targetCascadeBadgeZone = cardEffects.includes('send-gy')
+    ? action.targetOriginZone
+    : activeTargetZone;
   const followUpStatuses = (
     isTargetIntoFollowUpSpecialSummonStep
       ? [
@@ -643,7 +706,8 @@ export function ComboStepVisual({
   );
   const chainedPrimaryEffectType = secondaryEffectTypes.find((type) => type !== 'summon');
   const genericPrimaryEffectType = secondaryEffectTypes[0];
-  const genericFollowUpEffectType = secondaryEffectTypes[1];
+  const isFollowUpSendToExtraDeck = labelsToRender[2] === 'Send to Extra Deck';
+  const genericFollowUpEffectType = isFollowUpSendToExtraDeck ? 'return' : secondaryEffectTypes[1];
   const chainedTargetStatuses = (
     isTargetIntoFollowUpSpecialSummonStep && chainedPrimaryEffectType && TARGET_ONLY_STATUS_EFFECTS.has(chainedPrimaryEffectType)
       ? chainedPrimaryEffectType === 'send-gy' && action.targetOriginZone
@@ -714,6 +778,9 @@ export function ComboStepVisual({
   useEffect(() => () => {
     if (linkDragFrameRef.current !== null) {
       window.cancelAnimationFrame(linkDragFrameRef.current);
+    }
+    if (linkResizeFrameRef.current !== null) {
+      window.cancelAnimationFrame(linkResizeFrameRef.current);
     }
   }, []);
 
@@ -1269,14 +1336,16 @@ export function ComboStepVisual({
           )}
           {labelsToRender.map((lbl) => {
             const labelType = LABEL_TYPES[lbl];
-            const color = lbl === 'Normal Summon'
+            const color = lbl === 'Send to Extra Deck'
+              ? { text: 'text-violet-300', bg: 'bg-violet-400/10', border: 'border-violet-400/30' }
+              : lbl === 'Normal Summon'
               ? NORMAL_SUMMON_COLOR
               : labelType
                 ? EFFECT_STYLES[labelType]
                 : DEFAULT_ACTION_COLOR;
             return (
               <span key={lbl} className={`font-display font-semibold text-sm px-3 py-1 rounded-full ${color.text} ${color.bg} ${color.border} border`}>
-                {lbl}
+                {lbl === 'Continuous Spell & Trap' ? 'Continuous Spell' : lbl}
               </span>
             );
           })}
@@ -1293,7 +1362,7 @@ export function ComboStepVisual({
         </div>
 
         {/* Visual */}
-        <div className="flex items-start justify-center gap-2 flex-wrap">
+        <div className="flex w-max min-w-full items-start justify-center gap-2 md:w-auto md:flex-wrap">
           {action.targetOnly && action.targetCard && (
             <>
               {(action.type === 'pendulum' || action.type === 'set') && (
@@ -1338,6 +1407,7 @@ export function ComboStepVisual({
                 actionType={action.type}
                 useStarBorder
                 zone={sourceZones[0]}
+                scaleSide={singleScaleSide}
                 centerOverlay={singleScaleOverlay}
                 isActivated={sourceHasActivation}
               />
@@ -1352,8 +1422,20 @@ export function ComboStepVisual({
                 name={action.targetCard}
                 actionType={scaleActivateEffectType}
                 zone={action.targetZone}
-                statuses={scaleActivateEffectType === 'summon' ? ['special-summon'] : []}
+                statuses={scaleActivateEffectType === 'summon' ? ['special-summon'] : TARGET_ONLY_STATUS_EFFECTS.has(scaleActivateEffectType) ? [scaleActivateEffectType] : []}
               />
+              {action.followUpCard && labelsToRender[labelsToRender.length - 1] === 'Special Summon' && (
+                <>
+                  <SummonConnector zone={action.followUpZone} style={arrowColumnStyle} />
+                  <TaggedCardDisplay
+                    {...sharedCardDisplayProps}
+                    name={action.followUpCard}
+                    actionType="summon"
+                    zone={action.followUpZone}
+                    statuses={['special-summon']}
+                  />
+                </>
+              )}
             </>
           )}
 
@@ -1365,6 +1447,7 @@ export function ComboStepVisual({
                 actionType={action.type}
                 useStarBorder
                 zone={sourceZones[0]}
+                scaleSide={singleScaleSide}
                 centerOverlay={singleScaleOverlay}
               />
             </div>
@@ -1386,6 +1469,7 @@ export function ComboStepVisual({
                     actionType={action.type}
                     useStarBorder
                     zone={sourceZones[index]}
+                    scaleSide={side}
                     centerOverlay={centerOverlay}
                   />
                 );
@@ -1419,6 +1503,7 @@ export function ComboStepVisual({
                     actionType="scale"
                     useStarBorder
                     zone={scaleTargetCardsBySide.left.zone}
+                    scaleSide="left"
                     centerOverlay={<ScaleLeftOverlayIcon className="h-12 w-12" />}
                   />
                 )}
@@ -1429,6 +1514,7 @@ export function ComboStepVisual({
                     actionType="scale"
                     useStarBorder
                     zone={scaleTargetCardsBySide.right.zone}
+                    scaleSide="right"
                     centerOverlay={<ScaleRightOverlayIcon className="h-12 w-12" />}
                   />
                 )}
@@ -1532,11 +1618,19 @@ export function ComboStepVisual({
               />
               <div className="flex flex-col items-center gap-2 self-center">
                 <div className="flex min-h-8 items-center justify-center gap-2">
+                  {labelsToRender.includes('Send to Extra Deck') && (
+                    <span role="img" aria-label="Send to Extra Deck" className="flex h-8 w-8 items-center justify-center rounded-full border border-violet-400/30 bg-violet-400/10 text-violet-300">
+                      <ExtraDeckZoneIcon size={22} />
+                    </span>
+                  )}
                   {secondaryEffectTypes.map((type, index) => (
                     <ActionIcon key={`${type}-${index}`} type={type} />
                   ))}
                 </div>
-                <ActionArrow type={arrowEffectType} />
+                <ActionArrow type={arrowEffectType} color={labelsToRender.includes('Send to Extra Deck') ? '#c4b5fd' : undefined} />
+                {shouldShowTargetOriginBadge && (
+                  <SourceZoneBadge zone={action.targetOriginZone} className="min-w-[88px] justify-center" />
+                )}
               </div>
               <TaggedCardDisplay
                 {...sharedCardDisplayProps}
@@ -1553,7 +1647,7 @@ export function ComboStepVisual({
           {!action.targetOnly && !isScaleStep && !isActivateScaleStep && !isActivateFusionStep && !isActivateSimpleTwoCardStep && (
             <>
           {isMultiMaterialSummon && (
-            <div className="flex flex-col items-center justify-center gap-3 self-start" style={iconColumnStyle}>
+            <div className="flex flex-col items-center justify-center gap-3 self-start" style={iconColumnStyle} aria-label={`${action.label} symbol`}>
               <ActionIcon type={action.type} />
               {shouldUseCascadeStack && (
                 <div style={{ width: `${iconColumnWidth}px` }}>
@@ -1639,9 +1733,7 @@ export function ComboStepVisual({
 
           {isSelfReturnIntoFollowUpSpecialSummonStep && action.followUpCard && (
             <>
-              <div className="flex items-center self-start" style={{ ...arrowColumnStyle, ...sourceCascadeRightStyle }}>
-                <ActionArrow type="summon" />
-              </div>
+              <SummonConnector zone={action.followUpZone} style={{ ...arrowColumnStyle, ...sourceCascadeRightStyle }} />
               <TaggedCardDisplay
                 {...sharedCardDisplayProps}
                 name={action.followUpCard}
@@ -1953,9 +2045,7 @@ export function ComboStepVisual({
 
           {isGenericPrimarySummonAddStep && action.targetCard && action.followUpCard && (
             <>
-              <div className="flex items-center self-start" style={{ ...arrowColumnStyle, ...sourceCascadeRightStyle }}>
-                <ActionArrow type="summon" />
-              </div>
+              <SummonConnector zone={action.targetZone} style={{ ...arrowColumnStyle, ...sourceCascadeRightStyle }} />
               <TaggedCardDisplay
                 {...sharedCardDisplayProps}
                 name={action.targetCard}
@@ -1984,9 +2074,7 @@ export function ComboStepVisual({
 
           {isActivateSummonAddStep && action.targetCard && action.followUpCard && (
             <>
-              <div className="flex items-center self-start" style={{ ...arrowColumnStyle, ...sourceCascadeRightStyle }}>
-                <ActionArrow type="summon" />
-              </div>
+              <SummonConnector zone={action.targetZone} style={{ ...arrowColumnStyle, ...sourceCascadeRightStyle }} />
               <TaggedCardDisplay
                 {...sharedCardDisplayProps}
                 name={action.targetCard}
@@ -2017,8 +2105,8 @@ export function ComboStepVisual({
                   <ActionIcon type={genericChainMiddleEffectType} />
                 </div>
                 <ActionArrow type={genericChainMiddleEffectType} />
-                {shouldUseTargetCascadeStack && displayedTargetZone && (
-                  <SourceZoneBadge zone={activeTargetZone} prefix={targetZoneBadgePrefix} className="min-w-[88px] justify-center" />
+                {shouldUseTargetCascadeStack && targetCascadeBadgeZone && (
+                  <SourceZoneBadge zone={targetCascadeBadgeZone} prefix={targetZoneBadgePrefix} className="min-w-[88px] justify-center" />
                 )}
               </div>
               {targetCards.length > 1 ? (
@@ -2043,9 +2131,7 @@ export function ComboStepVisual({
                   statuses={[]}
                 />
               )}
-              <div className="flex items-center self-start" style={{ ...arrowColumnStyle, ...targetCascadeRightStyle }}>
-                <ActionArrow type="summon" />
-              </div>
+              <SummonConnector zone={action.followUpZone} style={{ ...arrowColumnStyle, ...targetCascadeRightStyle }} />
               <TaggedCardDisplay
                 {...sharedCardDisplayProps}
                 name={action.followUpCard}
@@ -2058,9 +2144,7 @@ export function ComboStepVisual({
 
           {isActivateSummonDestroyStep && action.targetCard && action.followUpCard && (
             <>
-              <div className="flex items-center self-start" style={{ ...arrowColumnStyle, ...sourceCascadeRightStyle }}>
-                <ActionArrow type="summon" />
-              </div>
+              <SummonConnector zone={action.targetZone} style={{ ...arrowColumnStyle, ...sourceCascadeRightStyle }} />
               <TaggedCardDisplay
                 {...sharedCardDisplayProps}
                 name={action.targetCard}
@@ -2099,9 +2183,7 @@ export function ComboStepVisual({
                 zone={action.targetZone}
                 statuses={['destroy']}
               />
-              <div className="flex items-center self-start" style={arrowColumnStyle}>
-                <ActionArrow type="summon" />
-              </div>
+              <SummonConnector zone={action.followUpZone} style={arrowColumnStyle} />
               <TaggedCardDisplay
                 {...sharedCardDisplayProps}
                 name={action.followUpCard}
@@ -2129,16 +2211,22 @@ export function ComboStepVisual({
               />
               <div className="flex flex-col items-center gap-2 self-center">
                 <div className="flex min-h-8 items-center justify-center gap-2">
-                  <ActionIcon type={genericFollowUpEffectType} />
+                  {isFollowUpSendToExtraDeck ? (
+                    <span role="img" aria-label="Send to Extra Deck" className="flex h-8 w-8 items-center justify-center rounded-full border border-violet-400/30 bg-violet-400/10 text-violet-300">
+                      <ExtraDeckZoneIcon size={22} />
+                    </span>
+                  ) : (
+                    <ActionIcon type={genericFollowUpEffectType} />
+                  )}
                 </div>
-                <ActionArrow type={genericFollowUpEffectType} />
+                <ActionArrow type={genericFollowUpEffectType} color={isFollowUpSendToExtraDeck ? '#c4b5fd' : undefined} />
               </div>
               <TaggedCardDisplay
                 {...sharedCardDisplayProps}
                 name={action.followUpCard}
                 actionType={genericFollowUpEffectType}
                 zone={action.followUpZone}
-                statuses={[genericFollowUpEffectType]}
+                statuses={isFollowUpSendToExtraDeck ? [] : [genericFollowUpEffectType]}
               />
             </>
           )}
@@ -2150,8 +2238,8 @@ export function ComboStepVisual({
                   <ActionIcon type={chainedPrimaryEffectType} />
                 </div>
                 <ActionArrow type={chainedPrimaryEffectType} />
-                {shouldUseTargetCascadeStack && displayedTargetZone && (
-                  <SourceZoneBadge zone={activeTargetZone} prefix={targetZoneBadgePrefix} className="min-w-[88px] justify-center" />
+                {shouldUseTargetCascadeStack && targetCascadeBadgeZone && (
+                  <SourceZoneBadge zone={targetCascadeBadgeZone} prefix={targetZoneBadgePrefix} className="min-w-[88px] justify-center" />
                 )}
               </div>
               {shouldUseTargetCascadeStack ? (
@@ -2194,12 +2282,11 @@ export function ComboStepVisual({
                   name={action.targetCard}
                   actionType={action.type}
                   zone={displayedTargetZone}
+                  originZone={chainedPrimaryEffectType === 'send-gy' ? action.targetOriginZone : undefined}
                   statuses={chainedTargetStatuses}
                 />
               )}
-              <div className="flex items-center self-start" style={{ ...arrowColumnStyle, ...targetCascadeRightStyle }}>
-                <ActionArrow type="summon" />
-              </div>
+              <SummonConnector zone={action.followUpZone} style={{ ...arrowColumnStyle, ...targetCascadeRightStyle }} />
               <TaggedCardDisplay
                 {...sharedCardDisplayProps}
                 name={action.followUpCard}
@@ -2214,26 +2301,32 @@ export function ComboStepVisual({
             <>
               <div
                 className={
-                  centerIcons.length > 0
+                  (centerIcons.length > 0 || labelsToRender.includes('Send to Extra Deck') || summonOriginZones.length > 0)
                     ? 'flex flex-col items-center gap-2 self-center'
                     : 'flex items-center self-start'
                 }
-                style={centerIcons.length > 0 ? sourceCascadeRightStyle : { ...arrowColumnStyle, ...sourceCascadeRightStyle }}
+                style={(centerIcons.length > 0 || labelsToRender.includes('Send to Extra Deck') || summonOriginZones.length > 0) ? sourceCascadeRightStyle : { ...arrowColumnStyle, ...sourceCascadeRightStyle }}
               >
-                {centerIcons.length > 0 ? (
+                {(centerIcons.length > 0 || labelsToRender.includes('Send to Extra Deck')) ? (
                   <>
                     <div className="flex min-h-8 items-center justify-center gap-2">
+                      {labelsToRender.includes('Send to Extra Deck') && (
+                        <span role="img" aria-label="Send to Extra Deck" className="flex h-8 w-8 items-center justify-center rounded-full border border-violet-400/30 bg-violet-400/10 text-violet-300">
+                          <ExtraDeckZoneIcon size={22} />
+                        </span>
+                      )}
                       {centerIcons.map((type, index) => (
                         <ActionIcon key={`${type}-${index}`} type={type} />
                       ))}
                     </div>
-                    <ActionArrow type={arrowEffectType} />
+                    <ActionArrow type={arrowEffectType} color={labelsToRender.includes('Send to Extra Deck') ? '#c4b5fd' : undefined} />
                   </>
                 ) : (
-                  <ActionArrow type={arrowEffectType} />
+                  <ActionArrow type={arrowEffectType} color={labelsToRender.includes('Send to Extra Deck') ? '#c4b5fd' : undefined} />
                 )}
-                {shouldUseTargetCascadeStack && displayedTargetZone && (
-                  <SourceZoneBadge zone={activeTargetZone} prefix={targetZoneBadgePrefix} className="min-w-[88px] justify-center" />
+                {summonOriginZones.map((zone) => <SourceZoneBadge key={zone} zone={zone} />)}
+                {shouldUseTargetCascadeStack && targetCascadeBadgeZone && (
+                  <SourceZoneBadge zone={targetCascadeBadgeZone} prefix={targetZoneBadgePrefix} className="min-w-[88px] justify-center" />
                 )}
                 {!shouldUseTargetCascadeStack && shouldShowTargetOriginBadge && (
                   <SourceZoneBadge zone={action.targetOriginZone} className="min-w-[88px] justify-center" />
@@ -2303,7 +2396,27 @@ export function ComboStepVisual({
             </>
           )}
 
-          {targetCards.length === 0 && null}
+          {action.drawAmount !== undefined && (
+            <div
+              className="flex items-center gap-2 self-center text-green-400"
+              role="img"
+              aria-label={`Draw ${action.drawAmount} ${action.drawAmount === 1 ? 'card' : 'cards'}`}
+            >
+              <ActionIcon type="draw" />
+              <span className="font-display text-2xl font-bold tabular-nums">+{action.drawAmount}</span>
+            </div>
+          )}
+
+          {action.discardAmount !== undefined && (
+            <div
+              className="flex items-center gap-2 self-center text-slate-400"
+              role="img"
+              aria-label={`Discard ${action.discardAmount} ${action.discardAmount === 1 ? 'card' : 'cards'}`}
+            >
+              <ActionIcon type="discard" />
+              <span className="font-display text-2xl font-bold tabular-nums">-{action.discardAmount}</span>
+            </div>
+          )}
 
           {shouldBalanceLeadingIconColumn && (
             <div className="shrink-0 self-start" style={iconColumnStyle} aria-hidden="true" />

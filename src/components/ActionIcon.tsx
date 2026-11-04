@@ -1,9 +1,11 @@
+import { useReducedMotion } from '@/hooks/useReducedMotion';
 /* eslint-disable react-refresh/only-export-components */
 import type { ComboAction } from '@/lib/comboParser';
 import { Skull, Search, RotateCcw, Play, LocateFixed } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { motion, useAnimation, useReducedMotion } from 'motion/react';
+import { motion, useAnimation, type Variants } from 'motion/react';
 import React from 'react';
+import { EquipIcon } from './EquipIcon';
 
 type IconComponentProps = {
   className?: string;
@@ -19,6 +21,7 @@ export const PHASE_BG_CLASS = 'bg-cyan-300/10';
 export const PHASE_BORDER_CLASS = 'border-cyan-300/30';
 
 type LordIconProps = React.HTMLAttributes<HTMLElement> & {
+  class?: string;
   src: string;
   trigger?: string;
   delay?: string;
@@ -35,11 +38,13 @@ type AnimatedIconsProps = React.HTMLAttributes<HTMLElement> & {
 };
 
 function LordIcon(props: LordIconProps) {
-  return React.createElement('lord-icon', props);
+  const reducedMotion = useReducedMotion();
+  return React.createElement('lord-icon', { ...props, trigger: reducedMotion ? undefined : props.trigger });
 }
 
 function AnimatedIcons(props: AnimatedIconsProps) {
-  return React.createElement('animated-icons', props);
+  const reducedMotion = useReducedMotion();
+  return React.createElement('animated-icons', { ...props, trigger: reducedMotion ? undefined : props.trigger });
 }
 
 // Custom lordi icon component for link action
@@ -114,7 +119,7 @@ const RevealIcon = ({ className }: IconComponentProps) => {
     controls.start(reduced ? 'normal' : 'animate');
   }, [controls, reduced]);
 
-  const frame = {
+  const frame: Variants = {
     normal: { opacity: 1 },
     animate: {
       opacity: [1, 0.65, 1],
@@ -126,7 +131,7 @@ const RevealIcon = ({ className }: IconComponentProps) => {
     },
   };
 
-  const scanLine = {
+  const scanLine: Variants = {
     normal: { y: 0, opacity: 1 },
     animate: {
       y: [-6, 6, -6],
@@ -603,7 +608,7 @@ const NegateIcon = ({ className }: IconComponentProps) => (
 const ContinuousSpellTrapIcon = ({ className }: IconComponentProps) => {
   const reduced = useReducedMotion();
 
-  const pathVariants = {
+  const pathVariants: Variants = {
     normal: {
       pathLength: 1,
       opacity: 1,
@@ -685,7 +690,7 @@ export const PhaseIcon = ({ className }: IconComponentProps) => {
     controls.start(reduced ? 'normal' : 'animate');
   }, [controls, reduced]);
 
-  const circleVariants = {
+  const circleVariants: Variants = {
     normal: { scale: 1 },
     animate: {
       scale: [1, 1.05, 0.98, 1],
@@ -693,7 +698,7 @@ export const PhaseIcon = ({ className }: IconComponentProps) => {
     },
   };
 
-  const needleVariants = {
+  const needleVariants: Variants = {
     normal: { rotate: 0, opacity: 1 },
     animate: {
       rotate: [0, 200, 170, 180],
@@ -947,6 +952,7 @@ export const EFFECT_STYLES: Record<ComboAction['type'], {
   bg: string;
   border: string;
 }> = {
+  'equip': { Icon: EquipIcon, text: 'text-amber-300', bg: 'bg-amber-300/10', border: 'border-amber-300/30' },
   'summon': { Icon: SummonIcon, text: 'text-pink-400', bg: 'bg-pink-400/10', border: 'border-pink-400/30' },
   'ritual': { Icon: RitualIcon, text: 'text-blue-700', bg: 'bg-blue-700/10', border: 'border-blue-700/30' },
   'send-gy': { Icon: Skull, text: 'text-muted-foreground', bg: 'bg-muted/20', border: 'border-muted-foreground/30' },
@@ -975,6 +981,7 @@ export const EFFECT_STYLES: Record<ComboAction['type'], {
 };
 
 const EFFECT_HEX: Record<ComboAction['type'], string> = {
+  'equip': '#fcd34d',
   'summon': '#f472b6',
   'ritual': '#1d4ed8',
   'send-gy': '#94a3b8',
@@ -1056,8 +1063,8 @@ export function EffectGlyph({ type, className }: { type: ComboAction['type']; cl
   return <Icon className={className || `w-5 h-5 ${text}`} />;
 }
 
-export function ActionArrow({ type }: { type: ComboAction['type'] }) {
-  const color = EFFECT_HEX[type];
+export function ActionArrow({ type, color: colorOverride }: { type: ComboAction['type']; color?: string }) {
+  const color = colorOverride ?? EFFECT_HEX[type];
 
   return (
     <div className="flex items-center px-2">

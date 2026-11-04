@@ -1,7 +1,9 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactElement } from 'react';
 import {
   createCombinedDeckAssignmentFromTexts,
   createDeckAssignment,
+  createLibraryDeck,
+  getLibraryDeckNames,
   getDeckBlockingErrors,
   getComboLibraryBackup,
   getSavedCombos,
@@ -28,37 +30,46 @@ import {
 } from '@/lib/comboLibrary';
 import { useCardImage } from '@/hooks/useCardImage';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog';
-import { ChevronDown, ChevronRight, Grid2X2, Info, List, Search, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Grid2X2, ImagePlus, Info, List, Maximize2, Plus, Search, X } from 'lucide-react';
+import * as HoverCardPrimitive from '@radix-ui/react-hover-card';
 import seedBackup from '@/data/combo-library-seed.json';
+import { getComboBranchGroups, getEndboardRoute, parseCombo } from '@/lib/comboParser';
 
 interface ComboLibraryProps {
   currentText: string;
   currentEndboardSlots?: SavedCombo['endboardSlots'];
   currentStepComments?: SavedCombo['stepComments'];
   currentComboLinks?: SavedCombo['comboLinks'];
+  currentCardNotes?: SavedCombo['cardNotes'];
+  currentEndboardSlotPrefix?: string;
   activeComboId?: string | null;
   externalSavedCombo?: SavedCombo | null;
   onLoad: (combo: SavedCombo) => void;
   onSave?: (combo: SavedCombo) => void;
+  onCollapse?: () => void;
 }
 
 const UNASSIGNED_DECK = '__unassigned__';
 const ALL_SUBSECTIONS = 'all';
 const UNCATEGORIZED_SUBSECTION = '__uncategorized__';
-const COMBO_LIBRARY_VIEW_KEY = 'combo-library-view';
+const COMBO_LIBRARY_VIEW_KEY = 'combo-library-view-v2';
 const COMBO_LIBRARY_DECK_KEY = 'combo-library-selected-deck';
+const DECK_THUMBNAILS_STORAGE_KEY = 'combo-library-deck-thumbnails';
 const DECK_COLORS_STORAGE_KEY = 'combo-library-deck-colors';
 const GITHUB_SEED_BACKUP = normalizeComboLibraryBackup(seedBackup);
-type ComboLibraryView = 'cards' | 'compact';
+type ComboLibraryView = 'search' | 'cards' | 'compact';
 type ComboDropPlacement = 'before' | 'after';
+type ComboPreviewCardField = 'playsAroundCards' | 'requiredCards';
+type ComboPreviewPosition = { bottom: number; left: number; width: number; maxHeight: number };
 
 function getInitialComboLibraryView(): ComboLibraryView {
-  if (typeof window === 'undefined') return 'cards';
+  if (typeof window === 'undefined') return 'search';
 
   try {
-    return window.localStorage.getItem(COMBO_LIBRARY_VIEW_KEY) === 'compact' ? 'compact' : 'cards';
+    const saved = window.localStorage.getItem(COMBO_LIBRARY_VIEW_KEY);
+    return saved === 'compact' || saved === 'cards' ? saved : 'search';
   } catch {
-    return 'cards';
+    return 'search';
   }
 }
 
@@ -82,6 +93,31 @@ const SECTION_LABELS: Record<DeckSection, string> = {
   extra: 'Extra Deck',
   side: 'Side Deck',
 };
+
+const PREVIEW_ENDBOARD_SLOT_ORDER = [
+  'top-left',
+  'top-right',
+  'extra-left',
+  'monster-1',
+  'monster-2',
+  'monster-3',
+  'monster-4',
+  'monster-5',
+  'extra-right',
+  'spell-left',
+  'spell-1',
+  'spell-2',
+  'spell-3',
+  'spell-4',
+  'spell-5',
+  'spell-right',
+  'hand-1',
+  'hand-2',
+  'hand-3',
+  'hand-4',
+  'hand-5',
+  'hand-6',
+];
 
 const DECK_NAME_STYLES = [
   { id: 'rose', label: 'Rose', swatch: 'bg-rose-300', text: 'text-rose-300', hoverRing: 'hover:ring-rose-300/55', hoverShadow: 'hover:shadow-[0_0_28px_rgba(253,164,175,0.20)]' },
@@ -128,6 +164,17 @@ function getDeckNameStyle(deck: string) {
   }
 
   return DECK_NAME_STYLES[hash % DECK_NAME_STYLES.length];
+}
+
+function getDeckThumbnails(): Record<string, string> {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(DECK_THUMBNAILS_STORAGE_KEY) || '{}');
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
+      : {};
+  } catch {
+    return {};
+  }
 }
 
 function getCustomDeckColors(): Record<string, string> {
@@ -205,16 +252,33 @@ function doesComboMatchSearch(combo: SavedCombo, query: string): boolean {
   const normalizedQuery = query.trim().toLowerCase();
   if (!normalizedQuery) return true;
 
-  return [
-    combo.name,
-    combo.text,
-    getComboDeckName(combo),
-    ...(combo.assignedDeck ? [
-      ...combo.assignedDeck.main.map((card) => card.name),
-      ...combo.assignedDeck.extra.map((card) => card.name),
-      ...combo.assignedDeck.side.map((card) => card.name),
-    ] : []),
-  ].some((value) => value.toLowerCase().includes(normalizedQuery));
+  return `${combo.name} ${getComboDeckName(combo)}`.toLowerCase().includes(normalizedQuery);
+}
+
+function normalizePreviewSlotCards(value: string | string[] | undefined): string[] {
+  return (Array.isArray(value) ? value : value ? [value] : [])
+    .flatMap((cardName) => typeof cardName === 'string' && cardName.trim() ? [cardName.trim()] : []);
+}
+
+function getComboEndboardPreviewCards(
+  combo: SavedCombo,
+  preferredSlotPrefix?: string,
+): Array<{ name: string; slotId: string; isHand: boolean; stackCount: number }> {
+  const slots = combo.endboardSlots || {};
+  const route = getEndboardRoute(getComboBranchGroups(parseCombo(combo.text)));
+  const slotPrefix = preferredSlotPrefix ?? (route ? `route:${route.baseStep}:${route.route}:` : undefined);
+
+  return PREVIEW_ENDBOARD_SLOT_ORDER.flatMap((slotId) => {
+    const cards = normalizePreviewSlotCards(slots[slotPrefix ? `${slotPrefix}${slotId}` : slotId]);
+    if (cards.length === 0) return [];
+
+    return [{
+      name: cards[cards.length - 1],
+      slotId,
+      isHand: slotId.startsWith('hand-'),
+      stackCount: cards.length,
+    }];
+  });
 }
 
 function getDeckTotal(cards: DeckCard[]): number {
@@ -441,6 +505,330 @@ function DeckSectionView({
   );
 }
 
+function ComboPreviewCardThumb({ name, compact = false }: { name: string; compact?: boolean }) {
+  const { data, isLoading } = useCardImage(name);
+  const imageUrl = data?.imageUrl || data?.croppedImageUrl;
+  const label = data?.name || name;
+
+  return (
+    <div className={`min-w-0 overflow-hidden rounded-md border border-border/60 bg-secondary/45 ${compact ? 'p-1' : 'p-1.5'}`}>
+      <div className={`relative mx-auto aspect-[0.686] w-full overflow-hidden rounded border border-white/10 bg-background/60 ${compact ? 'max-w-[2.8rem]' : 'max-w-[3.6rem]'}`}>
+        {imageUrl ? (
+          <img src={imageUrl} alt={label} className="h-full w-full object-cover" loading="lazy" />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center px-1 text-center text-[0.5rem] font-display font-semibold leading-tight text-muted-foreground">
+            {isLoading ? '...' : label}
+          </div>
+        )}
+      </div>
+      <p className="mt-1 truncate text-[0.58rem] font-display font-semibold leading-tight text-foreground/85" title={label}>
+        {label}
+      </p>
+    </div>
+  );
+}
+
+function ComboPreviewEditableCardList({
+  combo,
+  title,
+  field,
+  cards,
+  accentClass,
+  onUpdate,
+}: {
+  combo: SavedCombo;
+  title: string;
+  field: ComboPreviewCardField;
+  cards?: string[];
+  accentClass: string;
+  onUpdate: (combo: SavedCombo, field: ComboPreviewCardField, cards: string[]) => void;
+}) {
+  const [draftCard, setDraftCard] = useState('');
+  const normalizedCards = cards || [];
+
+  const addCard = () => {
+    const trimmedCard = draftCard.trim();
+    if (!trimmedCard) return;
+    onUpdate(combo, field, [...normalizedCards, trimmedCard]);
+    setDraftCard('');
+  };
+
+  const removeCard = (cardIndex: number) => {
+    onUpdate(combo, field, normalizedCards.filter((_, index) => index !== cardIndex));
+  };
+
+  return (
+    <div className="flex min-h-0 flex-col rounded-xl border border-border/50 bg-background/35 p-2">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h4 className={`font-display text-[0.68rem] font-bold uppercase tracking-wide ${accentClass}`}>
+          {title}
+        </h4>
+        <span className="text-[0.58rem] font-display font-semibold text-muted-foreground">{normalizedCards.length}</span>
+      </div>
+      <div className="mb-2 flex gap-1">
+        <input
+          value={draftCard}
+          onChange={(event) => setDraftCard(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              addCard();
+            }
+          }}
+          onClick={(event) => event.stopPropagation()}
+          aria-label={`${title} card for ${combo.name}`}
+          placeholder="Card name..."
+          className="min-w-0 flex-1 rounded-md border border-border/60 bg-secondary/60 px-2 py-1 text-[0.65rem] text-foreground outline-none placeholder:text-muted-foreground/50 focus:ring-1 focus:ring-primary/50"
+        />
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            addCard();
+          }}
+          aria-label={`Add ${title.toLowerCase()} card for ${combo.name}`}
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border/60 bg-secondary/70 text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <div className="grid min-h-0 flex-1 grid-cols-2 gap-2 overflow-y-auto pr-1">
+        {normalizedCards.length > 0 ? normalizedCards.map((cardName, index) => (
+          <div key={`${cardName}-${index}`} className="group/card relative">
+            <ComboPreviewCardThumb name={cardName} compact />
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                removeCard(index);
+              }}
+              aria-label={`Remove ${cardName} from ${title.toLowerCase()}`}
+              className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full border border-background/70 bg-background/80 text-muted-foreground opacity-100 shadow-lg transition-colors hover:text-foreground sm:opacity-0 sm:group-hover/card:opacity-100"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        )) : (
+          <p className="rounded-md border border-dashed border-border/50 px-2 py-3 text-center text-[0.65rem] leading-4 text-muted-foreground">
+            Add cards here.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ComboPreviewHoverWindow({
+  combo,
+  onUpdatePreviewCards,
+  onOpenPreview,
+  previewPosition,
+  previewSlotPrefix,
+  onPointerEnter,
+  onPointerLeave,
+}: {
+  combo: SavedCombo;
+  onUpdatePreviewCards: (combo: SavedCombo, field: ComboPreviewCardField, cards: string[]) => void;
+  onOpenPreview: (combo: SavedCombo) => void;
+  previewPosition: ComboPreviewPosition | null;
+  previewSlotPrefix?: string;
+  onPointerEnter: () => void;
+  onPointerLeave: () => void;
+}) {
+  if (!previewPosition) return null;
+
+  return (
+    <div
+      className="fixed z-50 overflow-y-auto rounded-2xl border border-border/60 bg-background/90 p-3 text-left shadow-2xl backdrop-blur-xl"
+      style={previewPosition}
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+      onPointerEnter={onPointerEnter}
+      onPointerLeave={onPointerLeave}
+    >
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          onOpenPreview(combo);
+        }}
+        aria-label={`Expand preview for ${combo.name}`}
+        title="Expand preview"
+        className="absolute right-3 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-border/60 bg-background/75 text-muted-foreground shadow-lg backdrop-blur transition-colors hover:text-foreground"
+      >
+        <Maximize2 className="h-4 w-4" />
+      </button>
+      <ComboPreviewContent combo={combo} onUpdatePreviewCards={onUpdatePreviewCards} previewSlotPrefix={previewSlotPrefix} />
+    </div>
+  );
+}
+
+function ComboPreviewContent({
+  combo,
+  onUpdatePreviewCards,
+  previewSlotPrefix,
+  isFullscreen = false,
+}: {
+  combo: SavedCombo;
+  onUpdatePreviewCards: (combo: SavedCombo, field: ComboPreviewCardField, cards: string[]) => void;
+  previewSlotPrefix?: string;
+  isFullscreen?: boolean;
+}) {
+  const endboardCards = getComboEndboardPreviewCards(combo, previewSlotPrefix);
+
+  return (
+      <div className={`grid gap-3 md:grid-cols-[3fr_1fr_1fr] ${isFullscreen ? 'h-full min-h-0' : 'max-h-[22rem]'}`}>
+        <section className={`rounded-xl border border-emerald-400/25 bg-emerald-400/10 p-3 ${isFullscreen ? 'min-h-0 overflow-y-auto' : 'min-h-[12rem]'}`}>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h3 className="font-display text-xs font-bold uppercase tracking-wide text-emerald-300">Endboard Preview</h3>
+            <span className="text-[0.65rem] font-display font-semibold text-muted-foreground">{endboardCards.length} cards</span>
+          </div>
+          {endboardCards.length > 0 ? (
+            <div className={`grid gap-2 ${isFullscreen ? 'grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10' : 'grid-cols-4 sm:grid-cols-5 lg:grid-cols-6'}`}>
+              {endboardCards.map((card) => (
+                <div key={`${card.slotId}-${card.name}`} className="relative">
+                  <ComboPreviewCardThumb name={card.name} />
+                  {card.stackCount > 1 && (
+                    <span className="absolute -right-1 -top-1 rounded-full border border-background bg-primary px-1.5 py-0.5 text-[0.55rem] font-display font-bold text-primary-foreground">
+                      x{card.stackCount}
+                    </span>
+                  )}
+                  {card.isHand && (
+                    <span className="mt-1 block truncate text-center text-[0.55rem] font-display font-bold uppercase text-amber-300">
+                      Hand
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex h-[9rem] items-center justify-center rounded-xl border border-dashed border-emerald-300/25 text-center text-xs leading-5 text-muted-foreground">
+              No saved endboard yet.
+            </div>
+          )}
+        </section>
+        <ComboPreviewEditableCardList
+          combo={combo}
+          title="Plays Around"
+          field="playsAroundCards"
+          cards={combo.playsAroundCards}
+          accentClass="text-amber-300"
+          onUpdate={onUpdatePreviewCards}
+        />
+        <ComboPreviewEditableCardList
+          combo={combo}
+          title="Required Cards"
+          field="requiredCards"
+          cards={combo.requiredCards}
+          accentClass="text-primary"
+          onUpdate={onUpdatePreviewCards}
+        />
+      </div>
+  );
+}
+
+function ComboPreviewButton({
+  combo,
+  onUpdatePreviewCards,
+  onOpenPreview,
+  previewSlotPrefix,
+}: {
+  combo: SavedCombo;
+  onUpdatePreviewCards: (combo: SavedCombo, field: ComboPreviewCardField, cards: string[]) => void;
+  onOpenPreview: (combo: SavedCombo) => void;
+  previewSlotPrefix?: string;
+}) {
+  const [previewPosition, setPreviewPosition] = useState<ComboPreviewPosition | null>(null);
+  const closePreviewTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearClosePreviewTimeout = () => {
+    if (!closePreviewTimeoutRef.current) return;
+    clearTimeout(closePreviewTimeoutRef.current);
+    closePreviewTimeoutRef.current = null;
+  };
+
+  const updatePreviewPosition = (previewTrigger: HTMLElement) => {
+    clearClosePreviewTimeout();
+
+    const rowElement = previewTrigger.closest('[data-combo-preview-row]') as HTMLElement | null;
+    let rowRect = (rowElement || previewTrigger).getBoundingClientRect();
+    const viewportHeight = window.innerHeight;
+    const viewportWidth = window.innerWidth;
+    const viewportMargin = 12;
+    const panelGap = 18;
+    const panelMaxHeight = 360;
+    const preferredMinHeight = 140;
+
+    if (
+      rowElement &&
+      typeof rowElement.scrollIntoView === 'function' &&
+      rowRect.top - panelGap - viewportMargin < preferredMinHeight
+    ) {
+      rowElement.scrollIntoView({ block: 'center', inline: 'nearest' });
+      rowRect = rowElement.getBoundingClientRect();
+    }
+
+    const availableAboveRow = Math.max(0, rowRect.top - panelGap - viewportMargin);
+    const maxHeight = Math.min(panelMaxHeight, availableAboveRow);
+    const bottom = Math.max(viewportMargin, viewportHeight - rowRect.top + panelGap);
+    const availableViewportWidth = viewportWidth - (viewportMargin * 2);
+    const width = Math.min(Math.max(320, rowRect.width), availableViewportWidth);
+    const left = Math.min(
+      Math.max(viewportMargin, rowRect.left),
+      Math.max(viewportMargin, viewportWidth - width - viewportMargin),
+    );
+
+    setPreviewPosition({
+      left,
+      width,
+      bottom,
+      maxHeight,
+    });
+  };
+
+  const scheduleClosePreview = () => {
+    clearClosePreviewTimeout();
+    closePreviewTimeoutRef.current = setTimeout(() => {
+      setPreviewPosition(null);
+      closePreviewTimeoutRef.current = null;
+    }, 180);
+  };
+
+  useEffect(() => clearClosePreviewTimeout, []);
+
+  return (
+    <span
+      className="group/preview relative inline-flex"
+      onMouseEnter={(event) => updatePreviewPosition(event.currentTarget)}
+      onMouseLeave={scheduleClosePreview}
+      onFocus={(event) => updatePreviewPosition(event.currentTarget)}
+      onBlur={scheduleClosePreview}
+    >
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          onOpenPreview(combo);
+        }}
+        className="flex h-8 w-8 items-center justify-center rounded-full border border-border/60 bg-background/50 text-xs font-display font-bold text-muted-foreground backdrop-blur transition-colors hover:text-foreground"
+        aria-label={`Preview ${combo.name}`}
+        title="Preview"
+      >
+        P
+      </button>
+      <ComboPreviewHoverWindow
+        combo={combo}
+        onUpdatePreviewCards={onUpdatePreviewCards}
+        onOpenPreview={onOpenPreview}
+        previewPosition={previewPosition}
+        previewSlotPrefix={previewSlotPrefix}
+        onPointerEnter={clearClosePreviewTimeout}
+        onPointerLeave={scheduleClosePreview}
+      />
+    </span>
+  );
+}
+
 function ComboLibraryCard({
   combo,
   isEditing,
@@ -457,12 +845,12 @@ function ComboLibraryCard({
   onLoad,
   onViewDeck,
   onOpenNotes,
+  onUpdatePreviewCards,
+  onOpenPreview,
+  previewSlotPrefix,
   onDuplicate,
   onStartRename,
   onDelete,
-  onDragStart,
-  onDragEnd,
-  onDropCombo,
   isDeckOpen,
 }: {
   combo: SavedCombo;
@@ -480,12 +868,12 @@ function ComboLibraryCard({
   onLoad: () => void;
   onViewDeck: () => void;
   onOpenNotes: () => void;
+  onUpdatePreviewCards: (combo: SavedCombo, field: ComboPreviewCardField, cards: string[]) => void;
+  onOpenPreview: (combo: SavedCombo) => void;
+  previewSlotPrefix?: string;
   onDuplicate: () => void;
   onStartRename: () => void;
   onDelete: () => void;
-  onDragStart: () => void;
-  onDragEnd: () => void;
-  onDropCombo: (placement: ComboDropPlacement) => void;
   isDeckOpen: boolean;
 }) {
   const previewCardName = getComboPreviewCardName(combo);
@@ -530,7 +918,14 @@ function ComboLibraryCard({
               ))}
             </select>
           )}
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={onDuplicate}
+              className="rounded-xl border border-border/60 bg-background/50 px-5 py-2.5 text-sm font-display font-semibold text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Copy
+            </button>
             <button
               type="button"
               onClick={onRename}
@@ -547,6 +942,7 @@ function ComboLibraryCard({
   return (
     <div className="group min-w-0 p-1">
       <div
+        data-combo-preview-row
         role="button"
         tabIndex={0}
         onClick={onLoad}
@@ -591,33 +987,30 @@ function ComboLibraryCard({
                 {isDeckOpen ? 'Hide Deck' : 'Deck'}
               </button>
             )}
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                onOpenNotes();
-              }}
-              className={`group/notes relative flex h-8 w-8 items-center justify-center rounded-full border bg-background/50 text-sm backdrop-blur transition-colors hover:text-foreground ${
-                combo.notes?.trim()
-                  ? 'border-primary/45 text-primary'
-                  : 'border-border/60 text-muted-foreground'
-              }`}
-              aria-label={`Open notes for ${combo.name}`}
-              title="Notes"
-            >
-              <Info className="h-4 w-4" />
-              <ComboNotesHoverPreview notes={combo.notes} />
-            </button>
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                onDuplicate();
-              }}
-              className="rounded-full border border-border/60 bg-background/50 px-3 py-1.5 text-xs font-display font-semibold text-muted-foreground backdrop-blur transition-colors hover:text-foreground"
-            >
-              Copy
-            </button>
+            <ComboNotesHoverPreview notes={combo.notes}>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onOpenNotes();
+                }}
+                className={`group/notes relative flex h-8 w-8 items-center justify-center rounded-full border bg-background/50 text-sm backdrop-blur transition-colors hover:text-foreground ${
+                  combo.notes?.trim()
+                    ? 'border-primary/45 text-primary'
+                    : 'border-border/60 text-muted-foreground'
+                }`}
+                aria-label={`Open notes for ${combo.name}`}
+                title="Notes"
+              >
+                <Info className="h-4 w-4" />
+              </button>
+            </ComboNotesHoverPreview>
+            <ComboPreviewButton
+              combo={combo}
+              onUpdatePreviewCards={onUpdatePreviewCards}
+              onOpenPreview={onOpenPreview}
+              previewSlotPrefix={previewSlotPrefix}
+            />
             <button
               type="button"
               onClick={(event) => {
@@ -647,14 +1040,27 @@ function ComboLibraryCard({
   );
 }
 
-function ComboNotesHoverPreview({ notes }: { notes?: string }) {
+function ComboNotesHoverPreview({ notes, children }: { notes?: string; children: ReactElement }) {
   const trimmedNotes = notes?.trim();
-  if (!trimmedNotes) return null;
+  if (!trimmedNotes) return children;
 
   return (
-    <span className="pointer-events-none absolute bottom-full right-0 z-50 mb-2 hidden max-h-48 w-max min-w-[12rem] max-w-[min(22rem,70vw)] overflow-y-auto whitespace-pre-wrap rounded-xl border border-border/60 bg-background/80 px-3 py-2 text-left text-xs leading-5 text-foreground/90 shadow-2xl backdrop-blur-md group-hover/notes:block group-focus-visible/notes:block">
-      {trimmedNotes}
-    </span>
+    <HoverCardPrimitive.Root openDelay={150} closeDelay={150}>
+      <HoverCardPrimitive.Trigger asChild>{children}</HoverCardPrimitive.Trigger>
+      <HoverCardPrimitive.Portal>
+        <HoverCardPrimitive.Content
+          side="top"
+          align="end"
+          sideOffset={8}
+          collisionPadding={12}
+          onClick={(event) => event.stopPropagation()}
+          className="z-50 w-[22rem] max-w-[calc(100vw-24px)] overflow-y-auto overscroll-contain whitespace-pre-wrap break-words rounded-xl border border-border/60 bg-background/95 px-3 py-2 text-left text-xs leading-5 text-foreground/90 shadow-2xl backdrop-blur-md"
+          style={{ maxHeight: 'min(24rem, var(--radix-hover-card-content-available-height))' }}
+        >
+          {trimmedNotes}
+        </HoverCardPrimitive.Content>
+      </HoverCardPrimitive.Portal>
+    </HoverCardPrimitive.Root>
   );
 }
 
@@ -910,8 +1316,18 @@ function DeckView({
   );
 }
 
+function LibraryThumbnail({ combo }: { combo: SavedCombo }) {
+  const { data } = useCardImage(getComboPreviewCardName(combo));
+  return (
+    <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border/60 bg-secondary/60">
+      {data ? <img src={data.croppedImageUrl || data.imageUrl} alt="" loading="lazy" className="h-full w-full object-cover" /> : <List className="h-4 w-4 text-muted-foreground" />}
+    </span>
+  );
+}
+
 function ComboLibraryCompactRow({
   combo,
+  isActive,
   isEditing,
   editDeck,
   editName,
@@ -924,6 +1340,9 @@ function ComboLibraryCompactRow({
   onLoad,
   onViewDeck,
   onOpenNotes,
+  onUpdatePreviewCards,
+  onOpenPreview,
+  previewSlotPrefix,
   onDuplicate,
   onStartRename,
   onDelete,
@@ -933,6 +1352,7 @@ function ComboLibraryCompactRow({
   isDeckOpen,
 }: {
   combo: SavedCombo;
+  isActive?: boolean;
   isEditing: boolean;
   editDeck: string;
   editName: string;
@@ -945,9 +1365,15 @@ function ComboLibraryCompactRow({
   onLoad: () => void;
   onViewDeck: () => void;
   onOpenNotes: () => void;
+  onUpdatePreviewCards: (combo: SavedCombo, field: ComboPreviewCardField, cards: string[]) => void;
+  onOpenPreview: (combo: SavedCombo) => void;
+  previewSlotPrefix?: string;
   onDuplicate: () => void;
   onStartRename: () => void;
   onDelete: () => void;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+  onDropCombo: (placement: ComboDropPlacement) => void;
   isDeckOpen: boolean;
 }) {
   const deckName = getComboDeckName(combo);
@@ -987,6 +1413,13 @@ function ComboLibraryCompactRow({
           )}
           <button
             type="button"
+            onClick={onDuplicate}
+            className="rounded-lg border border-border/60 bg-background/50 px-4 py-2 text-xs font-display font-semibold text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Copy
+          </button>
+          <button
+            type="button"
             onClick={onRename}
             className="rounded-lg bg-accent px-4 py-2 text-xs font-display font-semibold text-accent-foreground transition-all hover:brightness-110"
           >
@@ -999,6 +1432,7 @@ function ComboLibraryCompactRow({
 
   return (
     <div
+      data-combo-preview-row
       draggable
       onDragStart={(event) => {
         event.dataTransfer.setData('application/x-combo-id', combo.id);
@@ -1019,14 +1453,17 @@ function ComboLibraryCompactRow({
         const placement = event.clientY > rect.top + rect.height / 2 ? 'after' : 'before';
         onDropCombo(placement);
       }}
-      className="group flex cursor-grab items-center gap-2 rounded-lg border border-border/60 bg-secondary/25 px-3 py-2 transition-colors hover:border-primary/40 hover:bg-secondary/45 active:cursor-grabbing"
+      className={`group flex flex-wrap cursor-grab items-center gap-3 rounded-lg border p-3 transition-colors hover:border-primary/40 hover:bg-secondary/45 active:cursor-grabbing ${isActive ? 'border-primary/45 bg-primary/12 shadow-sm shadow-primary/10' : 'border-transparent bg-secondary/25'}`}
     >
       <button
         type="button"
         onClick={onLoad}
-        className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+        aria-label={combo.name}
+        aria-pressed={isActive}
+        className="flex items-center gap-3 min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
       >
-        <span className="truncate font-display text-sm font-semibold text-foreground" title={combo.name}>
+        <LibraryThumbnail combo={combo} />
+        <span className="truncate font-display text-base font-semibold text-foreground" title={combo.name}>
           {combo.name}
         </span>
       </button>
@@ -1040,27 +1477,27 @@ function ComboLibraryCompactRow({
             {isDeckOpen ? 'Hide Deck' : 'Deck'}
           </button>
         )}
-        <button
-          type="button"
-          onClick={onOpenNotes}
-          className={`group/notes relative flex h-8 w-8 items-center justify-center rounded-full border bg-background/50 text-sm transition-colors hover:text-foreground ${
-            combo.notes?.trim()
-              ? 'border-primary/45 text-primary'
-              : 'border-border/60 text-muted-foreground'
-          }`}
-          aria-label={`Open notes for ${combo.name}`}
-          title="Notes"
-        >
-          <Info className="h-4 w-4" />
-          <ComboNotesHoverPreview notes={combo.notes} />
-        </button>
-        <button
-          type="button"
-          onClick={onDuplicate}
-          className="rounded-full border border-border/60 bg-background/50 px-3 py-1.5 text-xs font-display font-semibold text-muted-foreground transition-colors hover:text-foreground"
-        >
-          Copy
-        </button>
+        <ComboNotesHoverPreview notes={combo.notes}>
+          <button
+            type="button"
+            onClick={onOpenNotes}
+            className={`group/notes relative flex h-8 w-8 items-center justify-center rounded-full border bg-background/50 text-sm transition-colors hover:text-foreground ${
+              combo.notes?.trim()
+                ? 'border-primary/45 text-primary'
+                : 'border-border/60 text-muted-foreground'
+            }`}
+            aria-label={`Open notes for ${combo.name}`}
+            title="Notes"
+          >
+            <Info className="h-4 w-4" />
+          </button>
+        </ComboNotesHoverPreview>
+        <ComboPreviewButton
+          combo={combo}
+          onUpdatePreviewCards={onUpdatePreviewCards}
+          onOpenPreview={onOpenPreview}
+          previewSlotPrefix={previewSlotPrefix}
+        />
         <button
           type="button"
           onClick={onStartRename}
@@ -1078,14 +1515,26 @@ function ComboLibraryCompactRow({
           ✕
         </button>
       </div>
-      <span className={`min-w-[7rem] shrink-0 truncate text-right font-display text-xs font-semibold ${deckStyle.text}`} title={deckName}>
+      <span className={`max-w-[40%] shrink-0 truncate rounded-full border border-current/30 px-3 py-1 text-right font-display text-xs font-semibold ${deckStyle.text}`} title={deckName}>
         {deckName}
       </span>
     </div>
   );
 }
 
-export function ComboLibrary({ currentText, currentEndboardSlots, currentStepComments, currentComboLinks, activeComboId, externalSavedCombo, onLoad, onSave }: ComboLibraryProps) {
+export function ComboLibrary({
+  currentText,
+  currentEndboardSlots,
+  currentStepComments,
+  currentComboLinks,
+  currentCardNotes,
+  currentEndboardSlotPrefix,
+  activeComboId,
+  externalSavedCombo,
+  onLoad,
+  onSave,
+  onCollapse,
+}: ComboLibraryProps) {
   const [combos, setCombos] = useState<SavedCombo[]>(getSavedCombos);
   const [saveName, setSaveName] = useState('');
   const [assignDeck, setAssignDeck] = useState(false);
@@ -1106,6 +1555,18 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
   const [viewingDeckComboId, setViewingDeckComboId] = useState<string | null>(null);
   const [isViewingSelectedDeck, setIsViewingSelectedDeck] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [deckSearchQuery, setDeckSearchQuery] = useState('');
+  const [isCreatingDeck, setIsCreatingDeck] = useState(false);
+  const [newDeckName, setNewDeckName] = useState('');
+  const [deckRevision, setDeckRevision] = useState(0);
+  const [isDeckSearchOpen, setIsDeckSearchOpen] = useState(true);
+  const [deckThumbnails, setDeckThumbnails] = useState(getDeckThumbnails);
+  const [thumbnailDeck, setThumbnailDeck] = useState<string | null>(null);
+  const [thumbnailDraft, setThumbnailDraft] = useState('');
+  const saveDeckThumbnails = (next: Record<string, string>) => {
+    window.localStorage.setItem(DECK_THUMBNAILS_STORAGE_KEY, JSON.stringify(next));
+    setDeckThumbnails(next);
+  };
   const [libraryView, setLibraryView] = useState<ComboLibraryView>(getInitialComboLibraryView);
   const [selectedSubsection, setSelectedSubsection] = useState(ALL_SUBSECTIONS);
   const [newSubsectionName, setNewSubsectionName] = useState('');
@@ -1123,15 +1584,20 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
   const [colorPickerDeck, setColorPickerDeck] = useState<string | null>(null);
   const [notesComboId, setNotesComboId] = useState<string | null>(null);
   const [notesDraft, setNotesDraft] = useState('');
+  const [previewComboId, setPreviewComboId] = useState<string | null>(null);
   const [dataTransferMessage, setDataTransferMessage] = useState('');
   const [, setDeckColorRevision] = useState(0);
   const importFileInputRef = useRef<HTMLInputElement>(null);
-  const deckOptions = useMemo(() => Array.from(new Set(combos.map(getComboDeckName)))
+  const deckOptions = useMemo(() => Array.from(new Set([...getLibraryDeckNames(), ...combos.map(getComboDeckName)]))
     .filter((deck) => deck !== 'Unassigned')
-    .sort((a, b) => a.localeCompare(b)), [combos]);
+    // The revision invalidates names stored outside React in localStorage.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    .sort((a, b) => a.localeCompare(b)), [combos, deckRevision]);
   const [selectedDeck, setSelectedDeck] = useState<string>(getInitialSelectedDeck);
   const selectedDeckSubsections = useMemo(
     () => selectedDeck !== 'all' && selectedDeck !== UNASSIGNED_DECK ? getDeckSubsections(selectedDeck) : [],
+    // External subsection storage is invalidated by this revision.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [selectedDeck, subsectionRevision],
   );
   const selectedAssignedDeck = selectedDeck !== 'all' && selectedDeck !== UNASSIGNED_DECK
@@ -1143,6 +1609,37 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
   const selectedDeckLinkedCombos = selectedDeck !== 'all' && selectedDeck !== UNASSIGNED_DECK
     ? combos.filter((combo) => getComboDeckName(combo) === selectedDeck)
     : [];
+  const liveActiveCombo = useMemo(() => {
+    if (!activeComboId) return undefined;
+
+    const savedActiveCombo = combos.find((combo) => combo.id === activeComboId) || externalSavedCombo;
+    if (!savedActiveCombo) return undefined;
+
+    return {
+      ...savedActiveCombo,
+      text: currentText,
+      endboardSlots: currentEndboardSlots ?? savedActiveCombo.endboardSlots,
+      stepComments: currentStepComments ?? savedActiveCombo.stepComments,
+      comboLinks: currentComboLinks ?? savedActiveCombo.comboLinks,
+      cardNotes: currentCardNotes ?? savedActiveCombo.cardNotes,
+    };
+  }, [
+    activeComboId,
+    combos,
+    currentCardNotes,
+    currentComboLinks,
+    currentEndboardSlots,
+    currentStepComments,
+    currentText,
+    externalSavedCombo,
+  ]);
+  const getPreviewCombo = (combo: SavedCombo): SavedCombo => (
+    liveActiveCombo && combo.id === liveActiveCombo.id ? liveActiveCombo : combo
+  );
+  const fullscreenPreviewBaseCombo = previewComboId
+    ? combos.find((combo) => combo.id === previewComboId) || (liveActiveCombo?.id === previewComboId ? liveActiveCombo : undefined)
+    : undefined;
+  const fullscreenPreviewCombo = fullscreenPreviewBaseCombo ? getPreviewCombo(fullscreenPreviewBaseCombo) : undefined;
   const selectedParentSubsection = selectedDeckSubsections.find((subsection) => subsection.id === selectedSubsection);
   const deckFilteredCombos = selectedDeck === 'all'
     ? combos
@@ -1159,14 +1656,16 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
   const hasGithubSeedData = GITHUB_SEED_BACKUP.combos.length > 0 || Object.keys(GITHUB_SEED_BACKUP.subsections).length > 0;
   const compactDeckTree = useMemo(() => deckOptions.flatMap((deckName) => {
     const deckCombos = combos.filter((combo) => getComboDeckName(combo) === deckName);
+    const matchingDeckCombos = deckCombos.filter((combo) => doesComboMatchSearch(combo, searchQuery));
     const subsections = getDeckSubsections(deckName);
-    const matchesSearch = deckName.toLowerCase().includes(searchQuery.trim().toLowerCase()) ||
-      deckCombos.some((combo) => doesComboMatchSearch(combo, searchQuery));
+    const matchesSearch = matchingDeckCombos.length > 0;
 
-    return matchesSearch ? [{ deckName, combos: deckCombos, subsections }] : [];
+    return matchesSearch ? [{ deckName, combos: matchingDeckCombos, subsections }] : [];
+  // External subsection storage is invalidated by this revision.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [combos, deckOptions, searchQuery, subsectionRevision]);
 
-  const persistDeckAssignmentForCombos = (
+  const persistDeckAssignmentForCombos = useCallback((
     deckName: string,
     nextDeck: DeckAssignment,
     sourceCombos: SavedCombo[] = combos,
@@ -1184,7 +1683,7 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
       const updatedCombo = updatedCombos.find((candidate) => candidate.id === combo.id);
       return updatedCombo || combo;
     });
-  };
+  }, [combos]);
 
   const buildSharedDeckAssignment = (
     deckName: string,
@@ -1252,6 +1751,7 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
       for (const deckName of deckOptions) {
         const existingDeck = nextCombos.find((combo) => getComboDeckName(combo) === deckName && combo.assignedDeck)?.assignedDeck;
         const sharedDeck = await buildSharedDeckAssignment(deckName, nextCombos, existingDeck);
+        if (isCancelled) return;
         const linkedCombos = nextCombos.filter((combo) => getComboDeckName(combo) === deckName);
         const needsUpdate = linkedCombos.some((combo) => !areDeckAssignmentsEqual(combo.assignedDeck, sharedDeck));
         if (!needsUpdate) continue;
@@ -1268,7 +1768,7 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
     return () => {
       isCancelled = true;
     };
-  }, [combos, deckOptions]);
+  }, [combos, deckOptions, persistDeckAssignmentForCombos]);
 
   const seedDeckFromCurrentCombo = async () => {
     if (saveMainDeck.trim()) return;
@@ -1305,7 +1805,7 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
       }
     }
 
-    let combo = saveCombo(assignedDeck?.name, saveName.trim(), currentText, assignedDeck, currentEndboardSlots, currentStepComments, currentComboLinks);
+    let combo = saveCombo(assignedDeck?.name || (selectedDeck !== 'all' && selectedDeck !== UNASSIGNED_DECK ? selectedDeck : undefined), saveName.trim(), currentText, assignedDeck, currentEndboardSlots, currentStepComments, currentComboLinks, currentCardNotes);
     let nextCombos = [combo, ...combos];
 
     if (assignedDeck) {
@@ -1499,6 +1999,7 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
       endboardSlots: currentEndboardSlots,
       stepComments: currentStepComments,
       comboLinks: currentComboLinks,
+      cardNotes: currentCardNotes,
     });
     if (!updatedCombo) return;
 
@@ -1542,6 +2043,16 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
   const handleOpenNotes = (combo: SavedCombo) => {
     setNotesComboId(combo.id);
     setNotesDraft(combo.notes || '');
+  };
+
+  const handleUpdatePreviewCards = (combo: SavedCombo, field: ComboPreviewCardField, cards: string[]) => {
+    const updatedCombo = updateCombo(combo.id, { [field]: cards });
+    if (!updatedCombo) return;
+
+    setCombos((current) => current.map((currentCombo) => currentCombo.id === combo.id ? updatedCombo : currentCombo));
+    if (activeComboId === combo.id) {
+      onSave?.(updatedCombo);
+    }
   };
 
   const handleSaveNotes = () => {
@@ -1664,6 +2175,11 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
     const nextDeckName = renameDeckValue.trim();
     const updatedCombos = renameDeck(selectedDeck, nextDeckName);
     migrateCustomDeckColor(selectedDeck, nextDeckName);
+    if (selectedDeck !== nextDeckName && deckThumbnails[selectedDeck]) {
+      const next = { ...deckThumbnails, [nextDeckName]: deckThumbnails[selectedDeck] };
+      delete next[selectedDeck];
+      saveDeckThumbnails(next);
+    }
     setCombos(updatedCombos);
     setSelectedDeck(nextDeckName || 'all');
     setIsRenamingDeck(false);
@@ -1808,7 +2324,8 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
   const renderCompactComboRows = (rows: SavedCombo[]) => rows.map((combo) => (
     <Fragment key={combo.id}>
       <ComboLibraryCompactRow
-        combo={combo}
+        isActive={activeComboId === combo.id}
+        combo={getPreviewCombo(combo)}
         isEditing={editingComboId === combo.id}
         editDeck={editDeck}
         editName={editName}
@@ -1821,6 +2338,9 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
         onLoad={() => onLoad(combo)}
         onViewDeck={() => setViewingDeckComboId((current) => current === combo.id ? null : combo.id)}
         onOpenNotes={() => handleOpenNotes(combo)}
+        onUpdatePreviewCards={handleUpdatePreviewCards}
+        onOpenPreview={(previewCombo) => setPreviewComboId(previewCombo.id)}
+        previewSlotPrefix={combo.id === activeComboId ? currentEndboardSlotPrefix : undefined}
         onDuplicate={() => handleDuplicate(combo.id)}
         onStartRename={() => handleStartComboRename(combo)}
         onDelete={() => handleDelete(combo.id)}
@@ -2011,79 +2531,65 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
   };
 
   return (
-    <div className="glass-panel rounded-xl p-5 space-y-4">
-      <div className="flex justify-end">
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <div className="flex rounded-lg border border-border/70 bg-background/35 p-1" aria-label="Combo library view">
-            <button
-              type="button"
-              onClick={() => setLibraryView('cards')}
-              aria-label="Show card view"
-              aria-pressed={libraryView === 'cards'}
-              className={`flex h-8 w-8 items-center justify-center rounded-md transition-colors ${libraryView === 'cards' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}
-            >
-              <Grid2X2 className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setLibraryView('compact');
-                setEditingComboId(null);
-                setViewingDeckComboId(null);
-              }}
-              aria-label="Show compact list view"
-              aria-pressed={libraryView === 'compact'}
-              className={`flex h-8 w-8 items-center justify-center rounded-md transition-colors ${libraryView === 'compact' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}
-            >
-              <List className="h-4 w-4" />
-            </button>
-          </div>
-          <button
-            type="button"
-            onClick={handleExportLibraryData}
-            className="rounded-lg border border-border bg-secondary/50 px-3 py-2 text-xs font-display font-semibold text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Export Data
-          </button>
-          <button
-            type="button"
-            onClick={() => importFileInputRef.current?.click()}
-            className="rounded-lg border border-border bg-secondary/50 px-3 py-2 text-xs font-display font-semibold text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Import Data
-          </button>
-          <input
-            ref={importFileInputRef}
-            type="file"
-            accept="application/json,.json"
-            className="hidden"
-            onChange={(event) => void handleImportLibraryFile(event.target.files?.[0])}
-          />
-          <button
-            type="button"
-            onClick={handleLoadGithubSeed}
-            disabled={!hasGithubSeedData}
-            className="rounded-lg border border-border bg-secondary/50 px-3 py-2 text-xs font-display font-semibold text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-            title={hasGithubSeedData ? 'Load committed seed data from src/data' : 'Replace src/data/combo-library-seed.json with an exported backup first'}
-          >
-            Load GitHub Data
-          </button>
-          <button
-            onClick={() => setShowSave(!showSave)}
-            disabled={!currentText.trim()}
-            className="px-4 py-2 bg-primary/90 text-primary-foreground font-display font-semibold rounded-lg text-xs hover:brightness-110 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            + Save Current
-          </button>
+    <div className="min-w-0 rounded-xl border border-border/55 bg-card/70 p-3 shadow-lg shadow-black/10 backdrop-blur space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="font-display text-lg font-semibold text-foreground">Combo Library</h2>
+        <div className="flex items-center gap-2">
+          <span className="rounded-full border border-border/60 bg-secondary/45 px-3 py-1 text-xs font-semibold text-muted-foreground">{visibleCombos.length}</span>
+          <button type="button" onClick={() => setShowSave(!showSave)} disabled={!currentText.trim()} aria-label="Save current combo" title="Save current combo" className="flex h-8 w-8 items-center justify-center rounded-full border border-primary/35 bg-primary/15 text-primary hover:bg-primary/20 disabled:opacity-40 disabled:cursor-not-allowed"><Plus className="h-3.5 w-3.5" /></button>
+          {onCollapse && <button type="button" onClick={onCollapse} aria-label="Collapse combo library" title="Collapse combo library" className="flex h-8 w-8 items-center justify-center rounded-full border border-border/55 bg-secondary/60 text-muted-foreground hover:text-foreground"><ChevronLeft className="h-3.5 w-3.5" /></button>}
         </div>
       </div>
-
+      <div className={`grid items-start gap-4 ${isDeckSearchOpen ? 'lg:grid-cols-[300px_minmax(0,1fr)]' : 'lg:grid-cols-[56px_minmax(0,1fr)]'}`}>
+        {isDeckSearchOpen ? (
+        <aside aria-label="Library deck search" className="min-w-0 rounded-xl border border-border/55 bg-card/70 p-3">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h3 className="font-display text-lg font-semibold text-foreground">Deck Search</h3>
+            <div className="flex items-center gap-2">
+              <span className="rounded-full border border-border/60 bg-secondary/45 px-2.5 py-1 text-xs text-muted-foreground">{deckOptions.length}</span>
+              <button type="button" onClick={() => { setNewDeckName(''); setIsCreatingDeck(true); }} aria-label="Add deck" title="Add deck" className="flex h-8 w-8 items-center justify-center rounded-full border border-primary/35 bg-primary/15 text-primary transition-colors hover:bg-primary/20"><Plus className="h-3.5 w-3.5" /></button>
+              <button type="button" onClick={() => setIsDeckSearchOpen(false)} aria-label="Collapse deck search" title="Collapse deck search" className="flex h-8 w-8 items-center justify-center rounded-full border border-border/55 bg-secondary/60 text-muted-foreground hover:text-foreground"><ChevronLeft className="h-3.5 w-3.5" /></button>
+            </div>
+          </div>
+          <label className="relative block">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input aria-label="Search library decks" value={deckSearchQuery} onChange={(event) => setDeckSearchQuery(event.target.value)} placeholder="Find a deck or archetype" className="h-11 w-full rounded-md border border-border bg-background/65 pl-9 pr-3 text-sm text-foreground outline-none placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary/40" />
+          </label>
+          <div role="group" aria-label="Deck filters" className="mt-3 flex gap-2">
+            {[{ id: 'all', name: 'All Decks' }, { id: UNASSIGNED_DECK, name: 'Unassigned' }].map((filter) => (
+              <button key={filter.id} type="button" onClick={() => setSelectedDeck(filter.id)} aria-pressed={selectedDeck === filter.id} className={`rounded-full border px-3 py-1.5 text-xs font-display font-semibold transition-colors ${selectedDeck === filter.id ? 'border-primary/45 bg-primary/12 text-primary' : 'border-border/45 bg-secondary/35 text-muted-foreground hover:text-foreground'}`}>{filter.name}</button>
+            ))}
+          </div>
+          <div role="region" aria-label="Library decks" tabIndex={0} className="deck-search-scroll mt-3 max-h-[clamp(220px,calc(100dvh-320px),680px)] space-y-2 overflow-y-auto rounded-lg border-y border-border/30 py-2 pl-1 pr-2 outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
+            {deckOptions.filter((deck) => deck.toLowerCase().includes(deckSearchQuery.trim().toLowerCase())).map((deck) => {
+              const deckCombos = combos.filter((combo) => getComboDeckName(combo) === deck);
+              return (
+                <div key={deck} className="relative">
+                <button type="button" aria-label={`Select deck ${deck}`} aria-pressed={selectedDeck === deck} onClick={() => setSelectedDeck(deck)} className={`grid w-full grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-3 rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/60 ${selectedDeck === deck ? 'border-primary/45 bg-primary/12 shadow-sm shadow-primary/10' : 'border-transparent bg-secondary/25 hover:border-border/60 hover:bg-secondary/55'}`}>
+                  <LibraryThumbnail combo={{ ...(deckCombos[0] || { id: deck, name: deck, text: '', createdAt: 0 }), thumbnailCardName: deckThumbnails[deck] || deckCombos[0]?.thumbnailCardName }} />
+                  <span className="truncate font-display text-base font-semibold text-foreground">{deck}</span>
+                  <span title={`${deckCombos.length} combos`} className="rounded-full border border-border/60 px-2 py-1 text-xs text-muted-foreground">{deckCombos.length}</span>
+                </button>
+                <button type="button" aria-label={`Change thumbnail for ${deck}`} title="Change deck thumbnail" onClick={() => { setThumbnailDeck(deck); setThumbnailDraft(deckThumbnails[deck] || ''); }} className="absolute left-3 top-3 flex h-10 w-10 items-end justify-end rounded-lg p-0.5 text-white opacity-0 transition-opacity duration-150 hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 [@media(hover:none)]:opacity-100"><span className="flex h-5 w-5 items-center justify-center rounded-full border border-white/20 bg-black/50 shadow-sm backdrop-blur-sm"><ImagePlus className="h-3 w-3" /></span></button>
+                </div>
+              );
+            })}
+            {!deckOptions.some((deck) => deck.toLowerCase().includes(deckSearchQuery.trim().toLowerCase())) && <p className="p-3 text-sm text-muted-foreground">No decks match your search.</p>}
+          </div>
+        </aside>
+        ) : (
+          <aside className="flex items-center justify-center rounded-xl border border-border/55 bg-card/70 p-2">
+            <button type="button" onClick={() => setIsDeckSearchOpen(true)} aria-label="Expand deck search" title="Expand deck search" className="flex h-10 w-10 items-center justify-center rounded-full border border-border/55 bg-secondary/60 text-muted-foreground hover:text-foreground"><Search className="h-4 w-4" /></button>
+          </aside>
+        )}
+        <div className="min-w-0 space-y-3">
       <label className="relative block">
-        <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-primary" />
+        <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <input
           value={searchQuery}
           onChange={(event) => setSearchQuery(event.target.value)}
-          placeholder="Try “Blue-Eyes” or “Synchro”..."
+          aria-label="Search combos"
+          placeholder="Find a combo or deck"
           className="h-11 w-full rounded-lg border border-border/70 bg-background/35 pl-10 pr-4 font-body text-sm text-foreground outline-none transition-all placeholder:text-muted-foreground/65 focus:border-primary/45 focus:bg-background/55 focus:ring-2 focus:ring-primary/25"
         />
       </label>
@@ -2273,27 +2779,14 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
         </div>
       )}
 
-      {combos.length === 0 ? (
+      {combos.length === 0 && deckOptions.length === 0 ? (
         <p className="text-xs text-muted-foreground text-center py-3">
           No saved combos yet. Write a combo and save it!
         </p>
       ) : (
         <div className="space-y-3">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-display font-semibold text-muted-foreground">Deck</span>
-            <select
-              value={selectedDeck}
-              onChange={(e) => setSelectedDeck(e.target.value)}
-              className="min-w-[180px] bg-secondary/50 border border-border rounded-lg px-3 py-2 text-sm text-foreground font-body focus:outline-none focus:ring-2 focus:ring-primary/50"
-            >
-              <option value="all">All Decks</option>
-              <option value={UNASSIGNED_DECK}>Unassigned</option>
-              {deckOptions.map((deck) => (
-                <option key={deck} value={deck}>
-                  {deck}
-                </option>
-              ))}
-            </select>
+
             {selectedDeck !== 'all' && (
               <>
                 <button
@@ -2437,13 +2930,15 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
               </button>
             </div>
           )}
-          <div className="max-h-[620px] overflow-y-auto px-1 pb-1">
+          <div role="region" aria-label="Combo library results" tabIndex={0} className="deck-search-scroll max-h-[clamp(220px,calc(100dvh-320px),680px)] overflow-y-auto rounded-lg border-y border-border/30 py-2 pl-1 pr-2 outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
             {visibleCombos.length === 0 ? (
               <p className="rounded-xl border border-border/60 bg-secondary/25 px-4 py-5 text-center text-xs text-muted-foreground">
                 {searchQuery.trim() ? 'No combos match your search.' : 'No saved combos for this deck yet.'}
               </p>
             ) : (
-              libraryView === 'compact' ? (
+              libraryView === 'search' ? (
+                <div className="space-y-2">{renderCompactComboRows(visibleCombos)}</div>
+              ) : libraryView === 'compact' ? (
                 <div className="space-y-1">
                   {selectedDeck === 'all' ? compactDeckTree.map(({ deckName, combos: deckCombos, subsections }) => {
                     const isDeckExpanded = expandedTreeDeck === deckName;
@@ -2522,7 +3017,7 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
                   {visibleCombos.map((combo) => (
                     <Fragment key={combo.id}>
                       <ComboLibraryCard
-                        combo={combo}
+                        combo={getPreviewCombo(combo)}
                         isEditing={editingComboId === combo.id}
                         editDeck={editDeck}
                         editName={editName}
@@ -2537,6 +3032,9 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
                         onLoad={() => onLoad(combo)}
                         onViewDeck={() => setViewingDeckComboId((current) => current === combo.id ? null : combo.id)}
                         onOpenNotes={() => handleOpenNotes(combo)}
+                        onUpdatePreviewCards={handleUpdatePreviewCards}
+                        onOpenPreview={(previewCombo) => setPreviewComboId(previewCombo.id)}
+                        previewSlotPrefix={combo.id === activeComboId ? currentEndboardSlotPrefix : undefined}
                         onDuplicate={() => handleDuplicate(combo.id)}
                         onStartRename={() => handleStartComboRename(combo)}
                         onDelete={() => handleDelete(combo.id)}
@@ -2559,6 +3057,116 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
           </div>
         </div>
       )}
+      <div className="flex justify-end">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <button type="button" onClick={() => setLibraryView('search')} aria-label="Show thumbnail list view" aria-pressed={libraryView === 'search'} className={`flex h-8 w-8 items-center justify-center rounded-lg border border-border/60 ${libraryView === 'search' ? 'bg-primary/20 text-primary' : 'text-muted-foreground'}`}><List className="h-4 w-4" /></button>
+          <div className="flex rounded-lg border border-border/70 bg-background/35 p-1" aria-label="Combo library view">
+            <button
+              type="button"
+              onClick={() => setLibraryView('cards')}
+              aria-label="Show card view"
+              aria-pressed={libraryView === 'cards'}
+              className={`flex h-8 w-8 items-center justify-center rounded-md transition-colors ${libraryView === 'cards' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              <Grid2X2 className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setLibraryView('compact');
+                setEditingComboId(null);
+                setViewingDeckComboId(null);
+              }}
+              aria-label="Show compact list view"
+              aria-pressed={libraryView === 'compact'}
+              className={`flex h-8 w-8 items-center justify-center rounded-md transition-colors ${libraryView === 'compact' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              <List className="h-4 w-4" />
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={handleExportLibraryData}
+            className="rounded-lg border border-border bg-secondary/50 px-3 py-2 text-xs font-display font-semibold text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Export Data
+          </button>
+          <button
+            type="button"
+            onClick={() => importFileInputRef.current?.click()}
+            className="rounded-lg border border-border bg-secondary/50 px-3 py-2 text-xs font-display font-semibold text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Import Data
+          </button>
+          <input
+            ref={importFileInputRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={(event) => void handleImportLibraryFile(event.target.files?.[0])}
+          />
+          <button
+            type="button"
+            onClick={handleLoadGithubSeed}
+            disabled={!hasGithubSeedData}
+            className="rounded-lg border border-border bg-secondary/50 px-3 py-2 text-xs font-display font-semibold text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+            title={hasGithubSeedData ? 'Load committed seed data from src/data' : 'Replace src/data/combo-library-seed.json with an exported backup first'}
+          >
+            Load GitHub Data
+          </button>
+
+        </div>
+      </div>
+
+        </div>
+      </div>
+      <Dialog open={isCreatingDeck} onOpenChange={setIsCreatingDeck}>
+        <DialogContent>
+          <DialogTitle>Create deck</DialogTitle>
+          <DialogDescription>Name your new deck. You can save combos to it afterward.</DialogDescription>
+          <form className="space-y-4" onSubmit={(event) => {
+            event.preventDefault();
+            const name = newDeckName.trim();
+            if (!name || ['all', UNASSIGNED_DECK, 'unassigned'].includes(name.toLowerCase()) || deckOptions.some((deck) => deck.toLowerCase() === name.toLowerCase())) return;
+            createLibraryDeck(name);
+            setDeckRevision((current) => current + 1);
+            setSelectedDeck(name);
+            setSelectedSubsection(ALL_SUBSECTIONS);
+            setDeckSearchQuery('');
+            setSearchQuery('');
+            setIsCreatingDeck(false);
+          }}>
+            <input autoFocus aria-label="New deck name" value={newDeckName} onChange={(event) => setNewDeckName(event.target.value)} placeholder="Deck name" className="h-11 w-full rounded-md border border-border bg-background/65 px-3 text-sm outline-none focus:ring-2 focus:ring-primary/40" />
+            {newDeckName.trim() && (['all', UNASSIGNED_DECK, 'unassigned'].includes(newDeckName.trim().toLowerCase()) || deckOptions.some((deck) => deck.toLowerCase() === newDeckName.trim().toLowerCase())) && <p role="alert" className="text-sm text-destructive">Choose a different deck name; this name is already in use.</p>}
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setIsCreatingDeck(false)} className="rounded-md border border-border px-3 py-2 text-sm">Cancel</button>
+              <button type="submit" disabled={!newDeckName.trim()} className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-40">Create deck</button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={thumbnailDeck !== null} onOpenChange={(open) => { if (!open) setThumbnailDeck(null); }}>
+        <DialogContent>
+          <DialogTitle>Deck thumbnail for {thumbnailDeck}</DialogTitle>
+          <DialogDescription>Choose a card name for this deck’s image. Leave it blank to use the automatic thumbnail.</DialogDescription>
+          <form onSubmit={(event) => {
+            event.preventDefault();
+            if (!thumbnailDeck) return;
+            const next = { ...deckThumbnails };
+            if (thumbnailDraft.trim()) next[thumbnailDeck] = thumbnailDraft.trim();
+            else delete next[thumbnailDeck];
+            saveDeckThumbnails(next);
+            setThumbnailDeck(null);
+          }} className="space-y-4">
+            <input autoFocus aria-label="Deck thumbnail card name" placeholder="Card name, e.g. Fallen of Albaz" value={thumbnailDraft} onChange={(event) => setThumbnailDraft(event.target.value)} className="h-11 w-full rounded-md border border-border bg-background/65 px-3 text-sm outline-none focus:ring-2 focus:ring-primary/40" />
+            {thumbnailDraft.trim() && <LibraryThumbnail combo={{ id: 'preview', name: thumbnailDraft, text: '', createdAt: 0, thumbnailCardName: thumbnailDraft }} />}
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setThumbnailDeck(null)} className="rounded-md border border-border px-3 py-2 text-sm">Cancel</button>
+              <button type="submit" className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground">Save thumbnail</button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
       <Dialog
         open={Boolean(notesCombo)}
         onOpenChange={(open) => {
@@ -2607,6 +3215,34 @@ export function ComboLibrary({ currentText, currentEndboardSlots, currentStepCom
               </div>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={Boolean(fullscreenPreviewCombo)}
+        onOpenChange={(open) => {
+          if (open) return;
+          setPreviewComboId(null);
+        }}
+      >
+        <DialogContent className="flex h-[calc(100vh-2rem)] max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-none flex-col border-border bg-background/95 p-5 text-foreground shadow-2xl backdrop-blur">
+          <div className="shrink-0">
+            <DialogTitle className="font-display text-2xl font-semibold">
+              Preview for {fullscreenPreviewCombo?.name || 'combo'}
+            </DialogTitle>
+            <DialogDescription>
+              Review the saved endboard, plays-around cards, and required cards for this combo.
+            </DialogDescription>
+          </div>
+          {fullscreenPreviewCombo && (
+            <div className="mt-4 min-h-0 flex-1">
+              <ComboPreviewContent
+                combo={fullscreenPreviewCombo}
+                onUpdatePreviewCards={handleUpdatePreviewCards}
+                previewSlotPrefix={fullscreenPreviewCombo.id === activeComboId ? currentEndboardSlotPrefix : undefined}
+                isFullscreen
+              />
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

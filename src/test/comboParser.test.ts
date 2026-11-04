@@ -1,6 +1,37 @@
 import { describe, expect, it } from 'vitest';
 
-import { getComboBranchGroups, getVisibleComboActionIndices, parseCombo } from '@/lib/comboParser';
+import { getComboBranchGroups, getEndboardRoute, getVisibleComboActionIndices, parseCombo } from '@/lib/comboParser';
+
+describe('Equip actions', () => {
+  it.each([
+    'Activate [Union Driver] to equip [A-Assault Core]',
+    'Equip [A-Assault Core] to [Union Driver]',
+    'Activate Union Driver to equip A-Assault Core',
+    'Equip A-Assault Core to Union Driver.',
+    'activate [Union Driver] TO EQUIP A-Assault Core!',
+  ])('parses receiving card and equipped card in %s', (text) => {
+    expect(parseCombo(text)[0]).toMatchObject({
+      type: 'equip', label: 'Equip', sourceCard: 'Union Driver', targetCard: 'A-Assault Core',
+    });
+  });
+
+  it('preserves route and chain metadata for Equip', () => {
+    expect(parseCombo('10.2a CL1 Activate [Union Driver] to equip [A-Assault Core]')[0]).toMatchObject({
+      type: 'equip', chainLink: 1, stepPath: { baseStep: 10, route: 2, substep: 'a' },
+    });
+  });
+});
+
+describe('endboard route resolution', () => {
+  it('uses current routes on initialization, selection, reorder, and deletion', () => {
+    const groups = getComboBranchGroups(parseCombo('10.2a Activate [Second]\n10.1a Activate [First]'));
+    expect(getEndboardRoute(groups)).toEqual({ baseStep: 10, route: 1 });
+    expect(getEndboardRoute(groups, { 10: 2 })).toEqual({ baseStep: 10, route: 2 });
+    const remaining = getComboBranchGroups(parseCombo('10.1a Activate [First]'));
+    expect(getEndboardRoute(remaining, { 10: 2 })).toEqual({ baseStep: 10, route: 1 });
+    expect(getEndboardRoute([], { 10: 2 })).toBeUndefined();
+  });
+});
 
 describe('parseCombo scale syntax', () => {
   it('defaults a single scaled card to the right side', () => {
@@ -267,6 +298,19 @@ describe('parseCombo target syntax', () => {
     expect(action.type).toBe('continuous');
     expect(action.targetOnly).toBe(true);
     expect(action.targetCard).toBe('Card B');
+  });
+
+  it('parses activate to put a card from the GY into the continuous spell and trap zone', () => {
+    const [action] = parseCombo('Activate [Snake-Eyes Flamberge Dragon] to put [Diabellstar the Black Witch] from the gy in the continuous spell and trap zone');
+    expect(action).toMatchObject({
+      type: 'continuous',
+      label: 'Continuous Spell & Trap',
+      sourceCard: 'Snake-Eyes Flamberge Dragon',
+      targetCard: 'Diabellstar the Black Witch',
+      targetOriginZone: 'gy',
+    });
+    expect(action.sourceZone).toBeUndefined();
+    expect(action.targetZone).toBeUndefined();
   });
 
   it('parses activate in the gy and put itself in the continuous spell and trap zone', () => {
@@ -936,7 +980,6 @@ describe('parseCombo activate effect syntax', () => {
 
   it.each([
     ['Activate [Card A] to search for [Card B] from the deck', 'Search', 'Card B', 'hand'],
-    ['Activate [Card A] to draw 2 cards', 'Draw', '2 cards', 'hand'],
   ])('parses generic two-way activate effects: %s', (line, label, targetCard, targetZone) => {
     const [action] = parseCombo(line);
 
@@ -1206,6 +1249,18 @@ describe('parseCombo activate effect syntax', () => {
     const [action] = parseCombo('Activate [Card A] to target [Card B]');
 
     expect(action.labels).toEqual(['Activate', 'Target']);
+  });
+
+  it('parses activate to target multiple cards in the same zone', () => {
+    const [action] = parseCombo('Activate [Secreterion] to target [Dracotail Arthalion] and [Dracotail Phryxul] in the gy');
+
+    expect(action.type).toBe('activate');
+    expect(action.labels).toEqual(['Activate', 'Target']);
+    expect(action.sourceCard).toBe('Secreterion');
+    expect(action.targetCard).toBe('Dracotail Arthalion');
+    expect(action.targetCards).toEqual(['Dracotail Arthalion', 'Dracotail Phryxul']);
+    expect(action.targetZone).toBe('gy');
+    expect(action.targetZones).toEqual(['gy', 'gy']);
   });
 
   it('parses activate target and set it as one compound step', () => {
@@ -1571,8 +1626,8 @@ describe('parseCombo activate effect syntax', () => {
     const [action] = parseCombo('Tribute [Flame wingman] to summon [rock]');
 
     expect(action.type).toBe('tribute');
-    expect(action.label).toBe('Tribute');
-    expect(action.labels).toEqual(['Tribute', 'Summon']);
+    expect(action.label).toBe('Tribute Summon');
+    expect(action.sourceCards).toEqual(['Flame wingman']);
     expect(action.sourceCard).toBe('Flame wingman');
     expect(action.targetCard).toBe('rock');
   });
@@ -1828,6 +1883,18 @@ describe('parseCombo summon shorthand syntax', () => {
     expect(action.targetCard).toBe('dark magician of destruction');
   });
 
+  it('parses tribute summon by tributing multiple cards without making the summoned card a material', () => {
+    const [action] = parseCombo('Tribute summon [Alba-Lenatus] by tributing [Dracotail Arthalion], [Fallen of the White] and [Fallen of Albaz].');
+
+    expect(action.type).toBe('summon');
+    expect(action.label).toBe('Normal Summon');
+    expect(action.labels).toEqual(['Tribute', 'Normal Summon']);
+    expect(action.sourceCard).toBe('Alba-Lenatus');
+    expect(action.sourceCards).toEqual(['Dracotail Arthalion', 'Fallen of the White', 'Fallen of Albaz']);
+    expect(action.sourceCards).not.toContain('Alba-Lenatus');
+    expect(action.targetCard).toBe('Alba-Lenatus');
+  });
+
   it('parses ss by sending a card to the gy', () => {
     const [action] = parseCombo('ss [Diabellstar] by sending [silvy] to the gy');
 
@@ -1851,6 +1918,40 @@ describe('parseCombo summon shorthand syntax', () => {
     expect(action.targetZone).toBe('hand');
   });
 
+  it.each([
+    'from the gy to the hand',
+    'from the gy',
+    'from gy to hand',
+    'from the graveyard to your hand.',
+  ])('parses ss into activate to add a card %s', (suffix) => {
+    const actions = parseCombo(`SS [Litera] and activate it to add [Artmage Pact] ${suffix}`);
+
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({
+      type: 'activate',
+      label: 'Special Summon',
+      labels: ['Special Summon', 'Activate', 'Add to Hand'],
+      sourceCard: 'Litera',
+      targetCard: 'Artmage Pact',
+      targetZone: 'hand',
+      targetOriginZone: 'gy',
+    });
+  });
+
+  it('parses bracketed ss into activate it to add multiple cards to hand', () => {
+    const [action] = parseCombo('SS [Krosea] from the hand and activate it to add [Mystical Space Typhoon] and [Phonix] to the hand');
+
+    expect(action.type).toBe('activate');
+    expect(action.label).toBe('Special Summon');
+    expect(action.labels).toEqual(['Special Summon', 'Activate', 'Add to Hand']);
+    expect(action.sourceCard).toBe('Krosea');
+    expect(action.sourceZone).toBe('hand');
+    expect(action.targetCard).toBe('Mystical Space Typhoon');
+    expect(action.targetCards).toEqual(['Mystical Space Typhoon', 'Phonix']);
+    expect(action.targetZone).toBe('hand');
+    expect(action.targetZones).toEqual(['hand', 'hand']);
+  });
+
   it('parses FS as fusion summon', () => {
     const [action] = parseCombo('FS [Card A]');
 
@@ -1866,5 +1967,163 @@ describe('parseCombo summon shorthand syntax', () => {
     expect(action.labels).toEqual(['Activate', 'Add to Hand']);
     expect(action.sourceCard).toBe('Miracle Ejector');
     expect(action.targetCard).toBe('EN Shuffle');
+  });
+});
+
+
+describe('sending to the Extra Deck', () => {
+  it('parses Pendulum Treasure sending Vidolium to the Extra Deck', () => {
+    const actions = parseCombo('Activate [Pendulum Treasure] to send [Vidolium] to the extra deck');
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({
+      type: 'activate', sourceCard: 'Pendulum Treasure',
+      labels: ['Activate', 'Send to Extra Deck'],
+      targetCard: 'Vidolium', targetZone: 'extra-deck',
+    });
+  });
+});
+
+
+describe('activation destroying itself and other cards', () => {
+  it.each([
+    ['Activate [Jupredo] to destroy itself and [Junoldo]', ['Jupredo', 'Junoldo']],
+    ['Activate [Jupredo] to destroy [Junoldo] and itself', ['Junoldo', 'Jupredo']],
+    ['Activate [Jupredo] to destroy itself, [Junoldo], and [Vidolium]', ['Jupredo', 'Junoldo', 'Vidolium']],
+  ])('parses %s', (text, targets) => {
+    const actions = parseCombo(text);
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({
+      type: 'activate', sourceCard: 'Jupredo', labels: ['Activate', 'Destroy'],
+      targetCard: targets[0], targetCards: targets,
+    });
+  });
+});
+
+
+describe('fusion materials referencing the activating card', () => {
+  it.each([
+    ['itself and [Medius]', ['Artmage Power Patron', 'Medius']],
+    ['[Medius] and itself', ['Medius', 'Artmage Power Patron']],
+  ])('resolves %s as fusion materials', (materials, expected) => {
+    const actions = parseCombo(`Activate [Artmage Power Patron] to fusion summon [Diactorus] using ${materials}`);
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({
+      type: 'activate', labels: ['Activate', 'Fusion Summon'],
+      sourceCard: 'Artmage Power Patron', sourceCards: expected,
+      targetCard: 'Diactorus',
+    });
+  });
+});
+
+
+describe('special summon then activate to set', () => {
+  it.each(['SS', 'Special Summon'])('parses %s Graflare activating to set Artmage Varnish', (summon) => {
+    const actions = parseCombo(`${summon} [Graflare] and activate it to set [Artmage Varnish]`);
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({
+      type: 'activate', label: 'Special Summon',
+      labels: ['Special Summon', 'Activate', 'Set'],
+      sourceCard: 'Graflare', targetCard: 'Artmage Varnish',
+    });
+  });
+});
+
+
+describe('activate-to-draw effects', () => {
+  it.each([
+    ['', 1], [' 1.', 1], [' +1.', 1], [' one', 1],
+    [' 2', 2], [' +2', 2], [' two', 2], [' 12 cards', 12],
+  ])('parses summon and activate to draw%s', (suffix, amount) => {
+    const actions = parseCombo(`SS [Finmel] and activate it to draw${suffix}`);
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({
+      type: 'activate',
+      label: 'Special Summon',
+      labels: ['Special Summon', 'Activate', 'Draw'],
+      sourceCard: 'Finmel',
+      drawAmount: amount,
+    });
+    expect(actions[0].targetCard).toBeUndefined();
+  });
+
+  it('preserves the summon origin', () => {
+    const [action] = parseCombo('SS [Finmel] from the gy and activate its effect to draw two cards.');
+    expect(action).toMatchObject({ sourceCard: 'Finmel', sourceZone: 'gy', drawAmount: 2 });
+  });
+
+  it.each(['draw', 'draw +1', 'draw one', 'draw 1 card'])('defaults and normalizes direct activation: %s', (effect) => {
+    const [action] = parseCombo(`Activate [Finmel] to ${effect}`);
+    expect(action).toMatchObject({ labels: ['Activate', 'Draw'], sourceCard: 'Finmel', drawAmount: 1 });
+  });
+
+  it('parses direct activation with a numeric card count', () => {
+    const [action] = parseCombo('Activate [Card A] to draw 2 cards');
+    expect(action).toMatchObject({ labels: ['Activate', 'Draw'], sourceCard: 'Card A', drawAmount: 2 });
+    expect(action.targetCard).toBeUndefined();
+  });
+});
+
+
+describe('tribute summon materials', () => {
+  it.each([
+    'Tribute summon [Non-Finito] using [Nervedo] and [S/T].',
+    'Tribute [Nervedo] and [S/T] to summon [Non-Finito].',
+  ])('parses %s', (text) => {
+    const actions = parseCombo(text);
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({
+      type: 'tribute', label: 'Tribute Summon',
+      sourceCard: 'Nervedo', sourceCards: ['Nervedo', 'S/T'], targetCard: 'Non-Finito',
+    });
+    expect(actions[0].targetCards).toBeUndefined();
+  });
+});
+
+
+it('parses activate destroy then send to the Extra Deck', () => {
+  const actions = parseCombo('Activate [Shade the Obscure] to destroy [Nervedo] to send [Vidolium] to the extra deck');
+  expect(actions).toHaveLength(1);
+  expect(actions[0]).toMatchObject({
+    type: 'activate', labels: ['Activate', 'Destroy', 'Send to Extra Deck'],
+    sourceCard: 'Shade the Obscure', targetCard: 'Nervedo',
+    followUpCard: 'Vidolium', followUpZone: 'extra-deck',
+  });
+});
+
+
+it.each(['and', ',', ', and'])('parses Pendulum Summon with individual origins separated by %s', (separator) => {
+  const actions = parseCombo(`Pendulum summon [Nervedo] from the hand ${separator} [Jupredo] from the extra deck.`);
+  expect(actions).toHaveLength(1);
+  expect(actions[0]).toMatchObject({
+    type: 'pendulum', label: 'Pendulum Summon', targetOnly: true,
+    targetCards: ['Nervedo', 'Jupredo'], targetZones: ['hand', 'extra-deck'],
+  });
+});
+
+
+describe('counted discard effects', () => {
+  it.each(['draw 2 and discard 1', 'draw two and discard one', 'draw +2 cards then discard 1 card', 'draw 2 and discard'])('parses %s', (effect) => {
+    const actions = parseCombo(`Activate [Junoldo] to ${effect}.`);
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({
+      sourceCard: 'Junoldo', labels: ['Activate', 'Draw', 'Discard'], drawAmount: 2, discardAmount: 1,
+    });
+    expect(actions[0].targetCard).toBeUndefined();
+  });
+  it.each(['discard', 'discard 1', 'discard one'])('parses activation to %s', (effect) => {
+    const [action] = parseCombo(`Activate [Junoldo] to ${effect}`);
+    expect(action).toMatchObject({ sourceCard: 'Junoldo', labels: ['Activate', 'Discard'], discardAmount: 1 });
+    expect(action.drawAmount).toBeUndefined();
+  });
+});
+
+
+it.each(["pendulum's effect", 'pendulum effect', 'as a scale'])('parses activation %s', (phrase) => {
+  const actions = parseCombo(`Activate [Vidolium] ${phrase} to destroy itself to ss [Artmage Power Patron] from the gy`);
+  expect(actions).toHaveLength(1);
+  expect(actions[0]).toMatchObject({
+    labels: ['Activate', 'Destroy', 'Special Summon'],
+    sourceCard: 'Vidolium', sourceIsScale: true, targetCard: 'Vidolium',
+    followUpCard: 'Artmage Power Patron', followUpZone: 'gy',
   });
 });

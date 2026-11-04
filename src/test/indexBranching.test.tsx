@@ -1,3 +1,4 @@
+import { MemoryRouter } from 'react-router-dom';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -14,7 +15,7 @@ vi.mock('@/components/SideRays', () => ({
 
 describe('Index branching breakdown', () => {
   it('reveals a selected route and then reconverges into one shared step', () => {
-    const { container } = render(<Index />);
+    const { container } = render(<MemoryRouter><Index /></MemoryRouter>);
     const editor = container.querySelector('[contenteditable="true"]') as HTMLDivElement;
 
     editor.innerHTML = [
@@ -52,7 +53,7 @@ describe('Index branching breakdown', () => {
   }, 15000);
 
   it('keeps a separate endboard layout for each route', () => {
-    const { container } = render(<Index />);
+    const { container } = render(<MemoryRouter><Index /></MemoryRouter>);
     const editor = container.querySelector('[contenteditable="true"]') as HTMLDivElement;
 
     editor.innerHTML = [
