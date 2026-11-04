@@ -11,7 +11,6 @@ import { ChevronLeft, ChevronRight, Expand, Link2, Minimize2, ShieldAlert, X } f
 import { AnimatedGradientText } from '@/components/AnimatedGradientText';
 import { SideRays } from '@/components/SideRays';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
-import { useIsMobile } from '@/hooks/use-mobile';
 import type { CardNoteMap } from '@/components/CardDisplay';
 import { cn } from '@/lib/utils';
 
@@ -893,7 +892,7 @@ function matchesShortcut(event: KeyboardEvent, options: {
 }
 
 export default function Index() {
-  const isMobile = useIsMobile();
+  const [isTouchMobileViewport, setIsTouchMobileViewport] = useState(false);
   const [comboText, setComboText] = useState('');
   const [steps, setSteps] = useState<ComboAction[]>([]);
   const [selectedRoutes, setSelectedRoutes] = useState<Partial<Record<number, number>>>({});
@@ -927,7 +926,7 @@ export default function Index() {
   const editorRef = useRef<HTMLDivElement>(null);
   const previousHighlightedStepRef = useRef<number | null>(null);
   const pendingEditorHighlightRef = useRef(false);
-  const touchStartXRef = useRef<number | null>(null);
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const comboTextRef = useRef(comboText);
   const endboardSlotsRef = useRef(endboardSlots);
   const stepCommentsRef = useRef(stepComments);
@@ -987,6 +986,24 @@ export default function Index() {
   useEffect(() => {
     activeSavedComboIdRef.current = activeSavedComboId;
   }, [activeSavedComboId]);
+
+  useEffect(() => {
+    const updateTouchViewport = () => {
+      const hasCoarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+      const hasNoHover = window.matchMedia?.('(hover: none)').matches ?? false;
+      setIsTouchMobileViewport(
+        window.innerWidth < 768 || (hasCoarsePointer && hasNoHover && window.innerWidth <= 1024),
+      );
+    };
+
+    updateTouchViewport();
+    window.addEventListener('resize', updateTouchViewport);
+    window.addEventListener('orientationchange', updateTouchViewport);
+    return () => {
+      window.removeEventListener('resize', updateTouchViewport);
+      window.removeEventListener('orientationchange', updateTouchViewport);
+    };
+  }, []);
 
   useEffect(() => {
     if (steps.length === 0) return;
@@ -1400,7 +1417,7 @@ export default function Index() {
   }, [isBreakdownFullMode]);
 
   useEffect(() => {
-    if (!isBreakdownFullMode || !isMobile) return;
+    if (!isBreakdownFullMode || !isTouchMobileViewport) return;
 
     const orientation = screen.orientation as ScreenOrientation & { lock?: (orientation: string) => Promise<void> };
     void orientation?.lock?.('landscape').catch(() => {
@@ -1415,7 +1432,7 @@ export default function Index() {
       }
 
     };
-  }, [isBreakdownFullMode, isMobile]);
+  }, [isBreakdownFullMode, isTouchMobileViewport]);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -1565,17 +1582,38 @@ export default function Index() {
   };
 
   const handleBreakdownTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
-    touchStartXRef.current = event.touches[0]?.clientX ?? null;
+    const touch = event.touches[0];
+    const target = event.target instanceof Element ? event.target : null;
+    const isInteractiveTarget = target?.closest(
+      'button, a, input, textarea, select, [role="button"], [role="link"], [contenteditable="true"], [tabindex]:not([tabindex="-1"]), [data-combo-link-badge], [data-no-step-swipe]',
+    );
+    const selection = window.getSelection();
+
+    if (!isTouchMobileViewport || event.touches.length !== 1 || isInteractiveTarget || (selection && !selection.isCollapsed)) {
+      touchStartRef.current = null;
+      return;
+    }
+
+    touchStartRef.current = touch ? { x: touch.clientX, y: touch.clientY } : null;
   };
 
   const handleBreakdownTouchEnd = (event: React.TouchEvent<HTMLDivElement>) => {
-    if (touchStartXRef.current === null || !isBreakdownFullMode) return;
+    const start = touchStartRef.current;
+    touchStartRef.current = null;
+    if (!start || !isBreakdownFullMode || !isTouchMobileViewport) return;
 
-    const endX = event.changedTouches[0]?.clientX ?? touchStartXRef.current;
-    const deltaX = endX - touchStartXRef.current;
-    touchStartXRef.current = null;
+    const target = event.target instanceof Element ? event.target : null;
+    const isInteractiveTarget = target?.closest(
+      'button, a, input, textarea, select, [role="button"], [role="link"], [contenteditable="true"], [tabindex]:not([tabindex="-1"]), [data-combo-link-badge], [data-no-step-swipe]',
+    );
+    const selection = window.getSelection();
+    if (isInteractiveTarget || (selection && !selection.isCollapsed)) return;
 
-    if (Math.abs(deltaX) < 48) return;
+    const touch = event.changedTouches[0];
+    if (!touch) return;
+    const deltaX = touch.clientX - start.x;
+    const deltaY = touch.clientY - start.y;
+    if (Math.abs(deltaX) < 64 || Math.abs(deltaX) < Math.abs(deltaY) * 1.35) return;
 
     if (deltaX < 0) {
       goToNextStep();
@@ -1992,7 +2030,7 @@ export default function Index() {
 
   const renderBreakdownVisual = (mode: 'inline' | 'full') => {
     if (!activeStep) return null;
-    const isDesktopFullMode = mode === 'full' && !isMobile;
+    const isDesktopFullMode = mode === 'full' && !isTouchMobileViewport;
 
     return (
       <div className="relative flex w-full items-center justify-center">
@@ -2658,44 +2696,54 @@ export default function Index() {
           <div className="flex min-h-full w-full items-center justify-center p-0">
             <div
               className="relative flex h-full min-h-[100dvh] w-full max-w-full items-center justify-center overflow-auto"
-              onTouchStart={handleBreakdownTouchStart}
-              onTouchEnd={handleBreakdownTouchEnd}
             >
-              <button
-                type="button"
-                onClick={goToPreviousStep}
-                disabled={activeVisibleStepPosition === 0}
-                className="absolute left-[max(0.5rem,env(safe-area-inset-left))] top-1/2 z-20 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full border border-white/10 bg-black/70 text-white shadow-lg backdrop-blur transition-all hover:bg-black/90 disabled:cursor-not-allowed disabled:opacity-35"
-                aria-label="Previous step"
-              >
-                <ChevronLeft className="h-5 w-5" />
-              </button>
-              <button
-                type="button"
-                onClick={goToNextStep}
-                disabled={activeVisibleStepPosition === visibleActionIndices.length - 1}
-                className="absolute right-[max(0.5rem,env(safe-area-inset-right))] top-1/2 z-20 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full border border-white/10 bg-black/70 text-white shadow-lg backdrop-blur transition-all hover:bg-black/90 disabled:cursor-not-allowed disabled:opacity-35"
-                aria-label="Next step"
-              >
-                <ChevronRight className="h-5 w-5" />
-              </button>
-              <button
-                type="button"
-                onClick={closeBreakdownFullMode}
-                className="absolute right-[max(0.75rem,env(safe-area-inset-right))] top-[max(0.75rem,env(safe-area-inset-top))] z-30 flex h-11 min-w-11 items-center justify-center gap-1 rounded-full border border-white/10 bg-black/80 px-3 text-white shadow-lg backdrop-blur transition-all hover:bg-black/90"
-                aria-label="Close full mode"
-              >
-                <Minimize2 className="h-4 w-4" />
-                <X className="h-4 w-4" />
-              </button>
-              <div className="absolute left-[max(0.75rem,env(safe-area-inset-left))] top-[max(0.75rem,env(safe-area-inset-top))] z-20 rounded-full border border-white/10 bg-black/70 px-3 py-1 text-xs font-display font-semibold text-white shadow-lg backdrop-blur">
-                Step {activeStep.stepPath?.label ?? activeVisibleStepPosition + 1} / {finalStepNumber}
-              </div>
-              <div className="absolute bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded-full border border-white/10 bg-black/70 px-3 py-1 text-[10px] font-display font-semibold uppercase tracking-[0.08em] text-white/80 shadow-lg backdrop-blur sm:tracking-[0.18em]">
-                Use Left/Right arrows
-              </div>
+              {!isTouchMobileViewport && (
+                <button
+                  type="button"
+                  onClick={goToPreviousStep}
+                  disabled={activeVisibleStepPosition === 0}
+                  className="absolute left-[max(0.5rem,env(safe-area-inset-left))] top-1/2 z-20 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full border border-white/10 bg-black/70 text-white shadow-lg backdrop-blur transition-all hover:bg-black/90 disabled:cursor-not-allowed disabled:opacity-35"
+                  aria-label="Previous step"
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
+              )}
+              {!isTouchMobileViewport && (
+                <button
+                  type="button"
+                  onClick={goToNextStep}
+                  disabled={activeVisibleStepPosition === visibleActionIndices.length - 1}
+                  className="absolute right-[max(0.5rem,env(safe-area-inset-right))] top-1/2 z-20 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full border border-white/10 bg-black/70 text-white shadow-lg backdrop-blur transition-all hover:bg-black/90 disabled:cursor-not-allowed disabled:opacity-35"
+                  aria-label="Next step"
+                >
+                  <ChevronRight className="h-5 w-5" />
+                </button>
+              )}
+              {!isTouchMobileViewport && (
+                <button
+                  type="button"
+                  onClick={closeBreakdownFullMode}
+                  className="absolute right-[max(0.75rem,env(safe-area-inset-right))] top-[max(0.75rem,env(safe-area-inset-top))] z-30 flex h-11 min-w-11 items-center justify-center gap-1 rounded-full border border-white/10 bg-black/80 px-3 text-white shadow-lg backdrop-blur transition-all hover:bg-black/90"
+                  aria-label="Close full mode"
+                >
+                  <Minimize2 className="h-4 w-4" />
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+              {!isTouchMobileViewport && (
+                <div className="absolute left-[max(0.75rem,env(safe-area-inset-left))] top-[max(0.75rem,env(safe-area-inset-top))] z-20 rounded-full border border-white/10 bg-black/70 px-3 py-1 text-xs font-display font-semibold text-white shadow-lg backdrop-blur">
+                  Step {activeStep.stepPath?.label ?? activeVisibleStepPosition + 1} / {finalStepNumber}
+                </div>
+              )}
+              {!isTouchMobileViewport && (
+                <div className="absolute bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded-full border border-white/10 bg-black/70 px-3 py-1 text-[10px] font-display font-semibold uppercase tracking-[0.08em] text-white/80 shadow-lg backdrop-blur sm:tracking-[0.18em]">
+                  Use Left/Right arrows
+                </div>
+              )}
               <div
-                className="flex min-h-[100dvh] w-full max-w-full items-center justify-center px-14 py-14 sm:px-16"
+                className={`flex min-h-[100dvh] w-full max-w-full items-center justify-center touch-pan-y ${isTouchMobileViewport ? 'px-0 py-0' : 'px-14 py-14 sm:px-16'}`}
+                onTouchStart={handleBreakdownTouchStart}
+                onTouchEnd={handleBreakdownTouchEnd}
               >
                 {renderBreakdownVisual('full')}
               </div>

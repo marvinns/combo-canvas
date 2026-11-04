@@ -1,4 +1,4 @@
-const CACHE_NAME = 'combo-canvas-shell-v1';
+const CACHE_NAME = 'combo-canvas-shell-v2';
 const SHELL_FILES = ['./', './manifest.webmanifest', './pwa-icon.svg'];
 
 self.addEventListener('install', (event) => {
