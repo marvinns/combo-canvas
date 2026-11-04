@@ -1561,11 +1561,11 @@ export function DeckCounterGuide() {
   };
 
   return (
-    <div className="relative isolate min-h-screen overflow-hidden">
+    <div className="relative isolate min-h-[100dvh] overflow-hidden">
       <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-0">
         <div className="shapegrid-canvas" />
       </div>
-      <main className="relative z-10 mx-auto max-w-[1600px] px-4 pt-6 pb-24 md:px-8">
+      <main className="relative z-10 mx-auto w-full max-w-[1600px] min-w-0 px-3 pt-4 pb-24 sm:px-4 sm:pt-6 md:px-8">
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2">
@@ -1582,7 +1582,7 @@ export function DeckCounterGuide() {
               Deck Counters
             </h1>
           </div>
-          <div className="grid min-w-[260px] grid-cols-3 gap-2 rounded-md border border-border/55 bg-background/35 p-2">
+          <div className="grid w-full min-w-0 grid-cols-3 gap-2 rounded-md border border-border/55 bg-background/35 p-2 sm:w-auto sm:min-w-[260px]">
             <div className="text-center">
               <div className="font-display text-lg font-semibold text-foreground">{decks.length}</div>
               <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Decks</div>
@@ -1679,7 +1679,7 @@ export function DeckCounterGuide() {
                         <input
                           value={selectedDeck.name}
                           onChange={(event) => updateDeck(selectedDeck.id, { name: event.target.value })}
-                          className="h-11 min-w-[240px] rounded-md border border-border bg-background/60 px-3 font-display text-xl font-semibold text-foreground outline-none focus:ring-2 focus:ring-primary/40"
+                          className="h-11 min-w-0 max-w-full flex-1 rounded-md border border-border bg-background/60 px-3 font-display text-lg font-semibold text-foreground outline-none focus:ring-2 focus:ring-primary/40 sm:min-w-[240px] sm:text-xl"
                         />
                       ) : (
                         <h2 className="font-display text-2xl font-semibold text-foreground">{selectedDeck.name}</h2>

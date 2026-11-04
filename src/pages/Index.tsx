@@ -2040,7 +2040,7 @@ export default function Index() {
   };
 
   return (
-    <div className="relative isolate min-h-screen overflow-hidden">
+    <div className="relative isolate min-h-[100dvh] overflow-hidden">
       <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-0">
         <div className="shapegrid-canvas">
           <SideRays
@@ -2058,8 +2058,8 @@ export default function Index() {
           />
         </div>
       </div>
-      <div className="relative z-10 p-4 md:p-8">
-      <div className="max-w-4xl mx-auto space-y-8">
+      <div className="relative z-10 p-3 sm:p-4 md:p-8">
+      <div className="mx-auto w-full max-w-4xl min-w-0 space-y-5 sm:space-y-8">
         {/* Header */}
         <header className="text-center space-y-2">
           <div className="flex justify-center">
@@ -2085,7 +2085,7 @@ export default function Index() {
         </header>
 
         {/* Input */}
-        <div className="glass-panel rounded-xl p-5 space-y-4">
+        <div className="glass-panel min-w-0 rounded-xl p-3 sm:p-5 space-y-4">
           <div className="relative">
             {comboText.length === 0 && (
               <div className="pointer-events-none absolute left-14 top-4 z-10 text-sm leading-7 text-muted-foreground/50">
@@ -2220,13 +2220,13 @@ export default function Index() {
                   refreshEditorCaretOffset(nextText);
                 }
               }}
-              className="h-36 overflow-y-auto whitespace-pre-wrap rounded-lg border border-border bg-secondary/50 py-4 pl-14 pr-4 text-sm leading-7 text-foreground outline-none focus:ring-2 focus:ring-primary/50"
+              className="h-36 overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-secondary/50 py-4 pl-12 pr-3 text-sm leading-7 text-foreground outline-none focus:ring-2 focus:ring-primary/50 sm:pl-14 sm:pr-4"
             />
             {inlineAutocomplete && editorRawCaretOffset !== null && (
               <div
                 aria-hidden="true"
                 data-testid="inline-combo-autocomplete"
-                className="pointer-events-none absolute inset-0 z-10 h-36 overflow-hidden whitespace-pre-wrap rounded-lg py-4 pl-14 pr-4 text-sm leading-7 text-transparent"
+                className="pointer-events-none absolute inset-0 z-10 h-36 overflow-hidden whitespace-pre-wrap break-words rounded-lg py-4 pl-12 pr-3 text-sm leading-7 text-transparent sm:pl-14 sm:pr-4"
               >
                 <div style={{ transform: 'translateY(var(--editor-scroll-offset, 0px))' }}>
                   <span>{comboText.slice(0, inlineAutocomplete.caretRawOffset)}</span>
@@ -2267,7 +2267,7 @@ export default function Index() {
               </div>
             )}
           </div>
-          <div className="flex flex-wrap gap-3">
+          <div className="flex flex-wrap gap-2 sm:gap-3">
             <button
               onClick={handleVisualize}
               className="min-w-[148px] px-4 py-2 bg-primary text-primary-foreground font-display font-semibold rounded-lg glow-primary hover:brightness-110 transition-all text-sm"
@@ -2695,11 +2695,11 @@ export default function Index() {
               <div className="absolute left-3 top-3 z-20 rounded-full border border-white/10 bg-black/70 px-3 py-1 text-xs font-display font-semibold text-white shadow-lg backdrop-blur">
                 Step {activeStep.stepPath?.label ?? activeVisibleStepPosition + 1} / {finalStepNumber}
               </div>
-              <div className="absolute bottom-3 left-1/2 z-20 -translate-x-1/2 rounded-full border border-white/10 bg-black/70 px-3 py-1 text-[10px] font-display font-semibold uppercase tracking-[0.18em] text-white/80 shadow-lg backdrop-blur">
+              <div className="absolute bottom-3 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded-full border border-white/10 bg-black/70 px-3 py-1 text-[10px] font-display font-semibold uppercase tracking-[0.08em] text-white/80 shadow-lg backdrop-blur sm:tracking-[0.18em]">
                 Use Left/Right arrows
               </div>
               <div
-                className="flex max-h-[94dvh] w-fit max-w-[96vw] items-center justify-center px-12 py-10"
+                className="flex max-h-[94dvh] w-fit max-w-[100vw] items-center justify-center px-12 py-12 sm:max-w-[96vw] sm:py-10"
               >
                 {renderBreakdownVisual('full')}
               </div>
